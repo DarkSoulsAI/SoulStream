@@ -2,6 +2,8 @@ import threading
 import cv2
 import numpy as np
 
+from hand_tracker import HandTracker, HandData
+
 CAPTURE_W, CAPTURE_H = 80, 60
 
 
@@ -19,6 +21,10 @@ class Camera:
         self._prev_gray = None
         self._running = True
 
+        self._hand_tracker = HandTracker()
+        self._hand_data = HandData()
+        self._hand_ema = 0.0
+
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
 
@@ -27,6 +33,9 @@ class Camera:
             ok, frame = self._cap.read()
             if not ok:
                 continue
+
+            # Hand tracking on full 320x240 frame before resize
+            hand_data = self._hand_tracker.process(frame)
 
             small = cv2.resize(frame, (CAPTURE_W, CAPTURE_H), interpolation=cv2.INTER_AREA)
             gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
@@ -48,10 +57,20 @@ class Camera:
                 self._motion = diff
                 self._avg_motion = avg_m
                 self._preview = preview
+                self._hand_data = hand_data
+                self._hand_ema = getattr(self._hand_tracker, '_ema_confidence', 0.0)
 
     def get_data(self):
         with self._lock:
             return self._brightness.copy(), self._motion.copy(), self._avg_motion
+
+    def get_hand_data(self) -> HandData:
+        with self._lock:
+            return self._hand_data
+
+    def get_hand_ema(self) -> float:
+        with self._lock:
+            return self._hand_ema
 
     def get_preview(self):
         with self._lock:
@@ -60,4 +79,5 @@ class Camera:
     def stop(self):
         self._running = False
         self._thread.join(timeout=2.0)
+        self._hand_tracker.close()
         self._cap.release()

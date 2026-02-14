@@ -152,6 +152,60 @@ class ParticleSystem:
 
         self.count = e
 
+    def spawn_palm_sparks(self, palm_ndc_x, palm_ndc_y):
+        slots = MAX_PARTICLES - self.count
+        if slots <= 0:
+            return
+
+        n = min(30, slots)
+
+        s = self.count
+        e = s + n
+
+        self.pos_x[s:e] = palm_ndc_x + np.random.uniform(-0.05, 0.05, n).astype(np.float32)
+        self.pos_y[s:e] = palm_ndc_y + np.random.uniform(-0.05, 0.05, n).astype(np.float32)
+
+        self.vel_x[s:e] = np.random.uniform(-0.10, 0.10, n).astype(np.float32)
+        self.vel_y[s:e] = np.random.uniform(0.15, 0.50, n).astype(np.float32)
+
+        # Colors: orange #FF8C00 to gold #FFD700, 15% white-hot sparks
+        t = np.random.uniform(0.0, 1.0, n).astype(np.float32)
+        spark = np.random.uniform(0.0, 1.0, n) < 0.15
+        # Orange (1.0, 0.55, 0.0) -> Gold (1.0, 0.84, 0.0)
+        self.color_r[s:e] = np.where(spark, 1.0, 1.0)
+        self.color_g[s:e] = np.where(spark, 1.0, 0.55 + t * 0.29)
+        self.color_b[s:e] = np.where(spark, 0.9, 0.0)
+
+        life_vals = np.random.uniform(0.4, 1.2, n).astype(np.float32)
+        self.life[s:e] = life_vals
+        self.max_life[s:e] = life_vals
+        self._phase[s:e] = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)
+
+        self.count = e
+
+    def recolor_fire_gradient(self, palm_ndc_x, palm_ndc_y):
+        if self.count == 0:
+            return
+
+        n = self.count
+        dx = self.pos_x[:n] - palm_ndc_x
+        dy = self.pos_y[:n] - palm_ndc_y
+        dist = np.sqrt(dx * dx + dy * dy)
+
+        # Normalize distance: t = clamp(dist / 1.0, 0, 1)
+        t = np.clip(dist, 0.0, 1.0)
+
+        # Hermite interpolation on green channel: smooth fire gradient
+        # Near palm (t=0): yellow (1.0, 1.0, 0.0)
+        # Far from palm (t=1): deep red (1.0, 0.27, 0.0)
+        # g = 1.0 - 0.73 * (3t^2 - 2t^3)
+        hermite = 3.0 * t * t - 2.0 * t * t * t
+        g = 1.0 - 0.73 * hermite
+
+        self.color_r[:n] = 1.0
+        self.color_g[:n] = g.astype(np.float32)
+        self.color_b[:n] = 0.0
+
     def update(self, dt, is_ember=False):
         if self.count == 0:
             return
