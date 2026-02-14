@@ -1,6 +1,7 @@
 import os
 import time
 import random
+from datetime import datetime, timezone
 import numpy as np
 import pyglet
 from pyglet.window import key
@@ -8,11 +9,13 @@ import moderngl
 
 from image_source import ImageSource
 from particles import ParticleSystem, MAX_PARTICLES
+from gui import GameMenu
 
 WIDTH, HEIGHT = 1280, 720
 SHADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shaders")
 IMAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image")
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
+RESULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result")
 
 # Audio file assignments
 AUDIO_OPENING = "dark-souls-the-ancient-dragon-choir.mp3"   # Looping ambience
@@ -210,9 +213,11 @@ _FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"]
 
 
 class DebugOverlay:
-    def __init__(self, ctx):
+    def __init__(self, ctx, win_w=WIDTH, win_h=HEIGHT):
         self.enabled = False
         self._ctx = ctx
+        self._win_w = win_w
+        self._win_h = win_h
         self._tex = ctx.texture((160, 120), 3)
         self._tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
@@ -237,23 +242,35 @@ class DebugOverlay:
         """
         self._prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
 
-        # Bottom-left quad: NDC coords for 160x120 preview
-        qw = 160 / WIDTH * 2.0
-        qh = 120 / HEIGHT * 2.0
+        self._preview_vbo = ctx.buffer(reserve=6 * 4 * 4)
+        self._vao = ctx.vertex_array(self._prog, [(self._preview_vbo, "2f 2f", "in_pos", "in_uv")])
+        self._rebuild_preview_quad(win_w, win_h)
+
+    def _rebuild_preview_quad(self, win_w, win_h):
+        """Rebuild the preview quad VBO for current window size."""
+        qw = 160 / win_w * 2.0
+        qh = 120 / win_h * 2.0
         x0, y0 = -1.0, -1.0
         x1, y1 = x0 + qw, y0 + qh
-
         verts = np.array([
-            x0, y0, 0, 0,
-            x1, y0, 1, 0,
-            x1, y1, 1, 1,
-            x0, y0, 0, 0,
-            x1, y1, 1, 1,
-            x0, y1, 0, 1,
+            x0, y0, 0, 1,
+            x1, y0, 1, 1,
+            x1, y1, 1, 0,
+            x0, y0, 0, 1,
+            x1, y1, 1, 0,
+            x0, y1, 0, 0,
         ], dtype="f4")
+        self._preview_vbo.orphan()
+        self._preview_vbo.write(verts.tobytes())
 
-        vbo = ctx.buffer(verts)
-        self._vao = ctx.vertex_array(self._prog, [(vbo, "2f 2f", "in_pos", "in_uv")])
+    def resize(self, win_w, win_h):
+        """Update positions for new window dimensions."""
+        self._win_w = win_w
+        self._win_h = win_h
+        self._rebuild_preview_quad(win_w, win_h)
+        # Reset lazy-init flag so hand panel labels get recreated at new positions
+        if hasattr(self, "_hand_panel_labels"):
+            del self._hand_panel_labels
 
         # Hand skeleton line/point shader
         hand_vert = """
@@ -275,10 +292,10 @@ class DebugOverlay:
             frag_color = vec4(v_color, 0.85);
         }
         """
-        self._hand_prog = ctx.program(vertex_shader=hand_vert, fragment_shader=hand_frag)
+        self._hand_prog = self._ctx.program(vertex_shader=hand_vert, fragment_shader=hand_frag)
         # 21 connections * 2 verts = 42 line verts + 21 joint points = 63 max
-        self._hand_vbo = ctx.buffer(reserve=63 * 5 * 4)
-        self._hand_line_vao = ctx.vertex_array(
+        self._hand_vbo = self._ctx.buffer(reserve=63 * 5 * 4)
+        self._hand_line_vao = self._ctx.vertex_array(
             self._hand_prog,
             [(self._hand_vbo, "2f 3f", "in_pos", "in_color")],
         )
@@ -348,14 +365,15 @@ class DebugOverlay:
 
         if not hasattr(self, "_hand_panel_labels"):
             # Lazy-init labels for the hand panel
+            rx = self._win_w - 20
             self._hand_status_label = pyglet.text.Label(
                 "", font_name="Consolas", font_size=14,
-                x=WIDTH - 20, y=160,
+                x=rx, y=160,
                 anchor_x="right", anchor_y="center",
             )
             self._hand_ema_label = pyglet.text.Label(
                 "", font_name="Consolas", font_size=10,
-                x=WIDTH - 20, y=140,
+                x=rx, y=140,
                 anchor_x="right", anchor_y="center",
                 color=(180, 180, 180, 200),
             )
@@ -363,13 +381,13 @@ class DebugOverlay:
             for i in range(5):
                 lbl = pyglet.text.Label(
                     "", font_name="Consolas", font_size=11,
-                    x=WIDTH - 20, y=118 - i * 18,
+                    x=rx, y=118 - i * 18,
                     anchor_x="right", anchor_y="center",
                 )
                 self._hand_finger_labels.append(lbl)
             self._hand_ndc_label = pyglet.text.Label(
                 "", font_name="Consolas", font_size=10,
-                x=WIDTH - 20, y=20,
+                x=rx, y=20,
                 anchor_x="right", anchor_y="center",
                 color=(180, 180, 180, 200),
             )
@@ -525,6 +543,15 @@ class SoulOverlay:
         self._prev_ember = False
         self._prev_image_name = None
 
+    def resize(self, win_w, win_h):
+        """Update label positions for new window dimensions."""
+        self._banner_label.x = win_w // 2
+        self._banner_label.y = win_h // 2
+        self._quote_label.x = win_w // 2
+        for i, lbl in enumerate(self._help_labels):
+            lbl.x = win_w - 20
+            lbl.y = win_h - 30 - i * 20
+
     def trigger_banner(self, text, color):
         """Start a banner fade-in -> hold -> fade-out animation."""
         self._banner_label.text = text
@@ -603,11 +630,12 @@ class SoulOverlay:
 
 class SoulStreamApp(pyglet.window.Window):
     def __init__(self):
-        super().__init__(WIDTH, HEIGHT, caption="Soul Stream", resizable=False,
+        super().__init__(WIDTH, HEIGHT, caption="Soul Stream", resizable=True,
                          config=pyglet.gl.Config(
                              major_version=3, minor_version=3,
                              double_buffer=True,
                          ))
+        self._is_fullscreen = False
 
         self.ctx = moderngl.create_context()
         self.ctx.enable(moderngl.PROGRAM_POINT_SIZE)
@@ -657,7 +685,97 @@ class SoulStreamApp(pyglet.window.Window):
             x=10, y=HEIGHT - 80, color=(180, 180, 180, 200),
         )
 
+        # Wall clock (bottom-right)
+        self._clock_label = pyglet.text.Label(
+            "", font_name="Consolas", font_size=12,
+            x=WIDTH - 10, y=10,
+            anchor_x="right", anchor_y="bottom",
+            color=(160, 150, 130, 180),
+        )
+        self._tz_name = datetime.now().astimezone().strftime("%Z")
+
+        # GUI overlay menu
+        self.menu = GameMenu(WIDTH, HEIGHT, callbacks={
+            "toggle_camera": self._gui_toggle_camera,
+            "prev_image":    self._gui_prev_image,
+            "next_image":    self._gui_next_image,
+            "set_mode_auto":     lambda: self._gui_set_mode(0),
+            "set_mode_humanity": lambda: self._gui_set_mode(1),
+            "set_mode_ember":    lambda: self._gui_set_mode(2),
+            "set_volume":    self._gui_set_volume,
+            "toggle_debug":  self._gui_toggle_debug,
+            "toggle_help":   self._gui_toggle_help,
+            "quit":          self._gui_quit,
+        })
+
+    # ── GUI menu callbacks ──────────────────────────────────
+
+    def _gui_toggle_camera(self):
+        if self.use_camera:
+            self.use_camera = False
+        else:
+            if self.camera is None:
+                from camera import Camera
+                self.camera = Camera()
+            self.use_camera = True
+            self.sound.play(AUDIO_CAMERA_ON)
+
+    def _gui_prev_image(self):
+        if not self.use_camera:
+            self.image_source.prev_image()
+            self.sound.play(AUDIO_BONFIRE_LIT)
+
+    def _gui_next_image(self):
+        if not self.use_camera:
+            self.image_source.next_image()
+            self.sound.play(AUDIO_BONFIRE_LIT)
+
+    def _gui_set_mode(self, mode):
+        self.mode_ctrl.mode = mode
+        self.mode_ctrl._cycle_start = time.monotonic()
+        self.sound.play(AUDIO_MODE_CYCLE)
+
+    def _gui_set_volume(self, value):
+        if self.sound._ambience_player:
+            self.sound._ambience_player.volume = value
+
+    def _gui_toggle_debug(self):
+        self.debug.enabled = not self.debug.enabled
+
+    def _gui_toggle_help(self):
+        self.overlay.toggle_help()
+        self.sound.play(AUDIO_HELP, volume=0.40)
+
+    def _save_screenshot(self):
+        """Save current frame to result/ with auto-generated name."""
+        os.makedirs(RESULT_DIR, exist_ok=True)
+        mode = MODE_NAMES[self.mode_ctrl.mode].split()[0].lower()  # auto/humanity/ember
+        state = "ember" if self.mode_ctrl.is_ember else "humanity"
+        source = "cam" if self.use_camera else self.image_source.image_name.rsplit(".", 1)[0]
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{stamp}_{source}_{mode}_{state}.png"
+        path = os.path.join(RESULT_DIR, filename)
+        pyglet.image.get_buffer_manager().get_color_buffer().save(path)
+        print(f"[Screenshot] Saved: {path}")
+        self.overlay.trigger_banner("SCREENSHOT SAVED", (180, 200, 220))
+
+    def _gui_quit(self):
+        dur = self.sound.play_quit()
+        self.sound.cleanup()
+        pyglet.clock.schedule_once(lambda dt: self._do_close(), min(dur, 2.0))
+
     def on_key_press(self, symbol, modifiers):
+        if symbol == key.TAB:
+            self.menu.sync_state(
+                use_camera=self.use_camera,
+                mode=self.mode_ctrl.mode,
+                debug=self.debug.enabled,
+                help_visible=self.overlay._help_visible,
+                volume=(self.sound._ambience_player.volume
+                        if self.sound._ambience_player else 0.25),
+            )
+            self.menu.toggle()
+            return
         if symbol == key.ESCAPE:
             dur = self.sound.play_quit()
             self.sound.cleanup()
@@ -678,6 +796,10 @@ class SoulStreamApp(pyglet.window.Window):
                     self.camera = Camera()
                 self.use_camera = True
                 self.sound.play(AUDIO_CAMERA_ON)
+        elif symbol == key.F11:
+            self._toggle_fullscreen()
+        elif symbol == key.S:
+            self._save_screenshot()
         elif symbol == key.H:
             self.overlay.toggle_help()
             self.sound.play(AUDIO_HELP, volume=0.40)
@@ -694,6 +816,53 @@ class SoulStreamApp(pyglet.window.Window):
         if self.camera:
             self.camera.stop()
         self.close()
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.menu.on_mouse_motion(x, y)
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        self.menu.on_mouse_press(x, y, button)
+
+    def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        self.menu.on_mouse_drag(x, y)
+
+    def on_mouse_release(self, x, y, button, modifiers):
+        self.menu.on_mouse_release(x, y)
+
+    def on_resize(self, width, height):
+        super().on_resize(width, height)
+        self.ctx.viewport = (0, 0, width, height)
+
+        # Update overlay / debug positions for new dimensions
+        self.overlay.resize(width, height)
+        self.debug.resize(width, height)
+
+        # Reposition HUD labels
+        self._mode_label.y = height - 20
+        self._particle_label.y = height - 40
+        self._source_label.y = height - 60
+        self._hand_label.y = height - 80
+
+        # Reposition clock
+        self._clock_label.x = width - 10
+
+        # Recreate the GUI menu at the new dimensions
+        self.menu = GameMenu(width, height, callbacks={
+            "toggle_camera": self._gui_toggle_camera,
+            "prev_image":    self._gui_prev_image,
+            "next_image":    self._gui_next_image,
+            "set_mode_auto":     lambda: self._gui_set_mode(0),
+            "set_mode_humanity": lambda: self._gui_set_mode(1),
+            "set_mode_ember":    lambda: self._gui_set_mode(2),
+            "set_volume":    self._gui_set_volume,
+            "toggle_debug":  self._gui_toggle_debug,
+            "toggle_help":   self._gui_toggle_help,
+            "quit":          self._gui_quit,
+        })
+
+    def _toggle_fullscreen(self):
+        self._is_fullscreen = not self._is_fullscreen
+        self.set_fullscreen(self._is_fullscreen)
 
     def on_draw(self):
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
@@ -772,10 +941,18 @@ class SoulStreamApp(pyglet.window.Window):
                     self._hand_label.text = "Hand: not detected"
                 self._hand_label.draw()
 
-        # Soul overlay (banners, quotes, help) — always last
+        # Soul overlay (banners, quotes, help)
         image_name = None if self.use_camera else self.image_source.image_name
         self.overlay.update(dt, self.mode_ctrl.is_ember, image_name)
         self.overlay.draw()
+
+        # Wall clock (bottom-right)
+        now_str = datetime.now().strftime("%H:%M:%S")
+        self._clock_label.text = f"{now_str}  {self._tz_name}"
+        self._clock_label.draw()
+
+        # GUI menu overlay — always last (on top of everything)
+        self.menu.draw()
 
     def on_close(self):
         self.sound.cleanup()
