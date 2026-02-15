@@ -1,4 +1,5 @@
 import os
+import math
 import time
 import random
 from datetime import datetime, timezone
@@ -17,6 +18,12 @@ IMAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image")
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
 RESULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result")
 
+# App states
+STATE_LOADING = 0
+STATE_INTRO = 1
+STATE_RUNNING = 2
+INTRO_DURATION = 5.0
+
 # Audio file assignments
 AUDIO_OPENING = "dark-souls-the-ancient-dragon-choir.mp3"   # Looping ambience
 AUDIO_EMBER_IGNITE = "dark-souls-kill.mp3"                  # Humanity -> Ember
@@ -27,9 +34,20 @@ AUDIO_HELP = "firekeeper.mp3"                               # Help panel toggle
 AUDIO_QUIT = "thank-you-dark-souls.mp3"                     # ESC quit
 AUDIO_MODE_CYCLE = "darksouls-pain.mp3"                     # SPACE mode cycle
 AUDIO_BOSS_OUT = "bossout.mp3"                              # Palm ember burst
+AUDIO_START = "i-offer-you-an-accord.mp3"                   # Loading -> intro transition
 
 OPENING_VOLUME = 0.25
 SFX_VOLUME = 0.60
+
+# Floating intro key definitions
+_INTRO_KEYS = [
+    ("SPACE",  "Cycle Modes",   (255, 140, 50)),    # orange
+    ("\u2190 \u2192",   "Change Image",  (80, 220, 255)),    # cyan
+    ("C",      "Toggle Camera", (80, 255, 120)),    # green
+    ("H",      "Help",          (255, 100, 220)),   # magenta
+    ("TAB",    "Menu",          (200, 168, 78)),     # gold
+    ("ESC",    "Quit",          (255, 80, 80)),      # red
+]
 
 # --- Sound Manager ---
 
@@ -38,19 +56,37 @@ class SoundManager:
 
     def __init__(self):
         self._ambience_player = None
+        self._ambience_source = None
         self._sounds = {}
         self._prev_ember = False
 
-        # Load opening ambience (looping)
-        self._ambience_player = self._load_ambience(AUDIO_OPENING, OPENING_VOLUME)
+        # Pre-load ambience source but don't play yet
+        self._ambience_source = self._load_source(AUDIO_OPENING)
 
         # Load all one-shot sounds
         for name in (AUDIO_EMBER_IGNITE, AUDIO_HUMANITY_RESTORED, AUDIO_BONFIRE_LIT,
                      AUDIO_CAMERA_ON, AUDIO_HELP, AUDIO_QUIT, AUDIO_MODE_CYCLE,
-                     AUDIO_BOSS_OUT):
+                     AUDIO_BOSS_OUT, AUDIO_START):
             src = self._load_source(name)
             if src is not None:
                 self._sounds[name] = src
+
+    def start_ambience(self):
+        """Start looping ambience playback (called on intro state entry)."""
+        if self._ambience_player is not None:
+            return  # already playing
+        if self._ambience_source is None:
+            return
+        try:
+            player = pyglet.media.Player()
+            player.queue(self._ambience_source)
+            player.loop = True
+            player.volume = OPENING_VOLUME
+            player.play()
+            self._ambience_player = player
+            print(f"[SoundManager] Ambience started")
+        except Exception as e:
+            print(f"[SoundManager] Could not start ambience: {e}")
 
     def _load_source(self, filename):
         try:
@@ -64,25 +100,6 @@ class SoundManager:
             return source
         except Exception as e:
             print(f"[SoundManager] Could not load '{filename}': {e}")
-            return None
-
-    def _load_ambience(self, filename, volume):
-        try:
-            path = os.path.join(AUDIO_DIR, filename)
-            source = pyglet.media.load(path, streaming=False)
-            dur = source.duration
-            if dur is None or dur < 0.05 or dur > 600.0:
-                print(f"[SoundManager] Ambience '{filename}' unusual duration, skipping.")
-                return None
-            player = pyglet.media.Player()
-            player.queue(source)
-            player.loop = True
-            player.volume = volume
-            player.play()
-            print(f"[SoundManager] Ambience: {filename} ({dur:.1f}s, vol={volume})")
-            return player
-        except Exception as e:
-            print(f"[SoundManager] Could not load ambience '{filename}': {e}")
             return None
 
     def play(self, filename, volume=None):
@@ -642,6 +659,11 @@ class SoulStreamApp(pyglet.window.Window):
         self.ctx.enable(moderngl.BLEND)
         self.ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE)
 
+        # --- App state machine ---
+        self._state = STATE_LOADING
+        self._float_keys_timer = 0.0
+        self._float_keys_active = False
+
         # Image source as primary
         self.image_source = ImageSource(IMAGE_DIR, WIDTH, HEIGHT)
         self.use_camera = False
@@ -708,6 +730,76 @@ class SoulStreamApp(pyglet.window.Window):
             "quit":          self._gui_quit,
         })
 
+        # --- Loading screen assets ---
+        self._loading_bg_sprite = None
+        try:
+            bg_path = os.path.join(IMAGE_DIR, "darksouls1.jpg")
+            bg_img = pyglet.image.load(bg_path)
+            self._loading_bg_sprite = pyglet.sprite.Sprite(bg_img)
+            # Scale to fill window
+            sx = WIDTH / bg_img.width
+            sy = HEIGHT / bg_img.height
+            scale = max(sx, sy)
+            self._loading_bg_sprite.scale = scale
+            self._loading_bg_sprite.x = (WIDTH - bg_img.width * scale) / 2
+            self._loading_bg_sprite.y = (HEIGHT - bg_img.height * scale) / 2
+        except Exception as e:
+            print(f"[Loading] Could not load background: {e}")
+
+        # Dark overlay rectangle (reused every frame)
+        self._loading_overlay = pyglet.shapes.Rectangle(0, 0, WIDTH, HEIGHT, color=(0, 0, 0))
+        self._loading_overlay.opacity = 160
+
+        self._loading_title = pyglet.text.Label(
+            "SoulStream", font_name="Georgia", font_size=64,
+            x=WIDTH // 2, y=HEIGHT // 2 + 60,
+            anchor_x="center", anchor_y="center",
+            color=(200, 168, 78, 255),
+        )
+        self._loading_subtitle = pyglet.text.Label(
+            "by \u6eaf\u6d41\u5149", font_name="Georgia", font_size=22,
+            x=WIDTH // 2, y=HEIGHT // 2 - 10,
+            anchor_x="center", anchor_y="center",
+            color=(230, 220, 200, 220),
+        )
+        self._loading_version = pyglet.text.Label(
+            "v1.0", font_name="Consolas", font_size=12,
+            x=WIDTH // 2, y=40,
+            anchor_x="center", anchor_y="center",
+            color=(140, 130, 120, 160),
+        )
+        self._loading_start = pyglet.text.Label(
+            "PRESS ENTER", font_name="Georgia", font_size=20,
+            x=WIDTH // 2, y=HEIGHT // 2 - 80,
+            anchor_x="center", anchor_y="center",
+            color=(200, 168, 78, 255),
+        )
+        self._loading_time = 0.0
+
+        # --- Intro floating key labels ---
+        self._intro_labels = []
+        n_keys = len(_INTRO_KEYS)
+        for i, (key_name, desc, color) in enumerate(_INTRO_KEYS):
+            # Scatter across screen in a loose 3x2 grid
+            col = i % 3
+            row = i // 3
+            lx = int(WIDTH * (0.2 + col * 0.3))
+            ly = int(HEIGHT * (0.6 - row * 0.25))
+            lbl = pyglet.text.Label(
+                f"  [{key_name}]  {desc}  ",
+                font_name="Consolas", font_size=16,
+                x=lx, y=ly,
+                anchor_x="center", anchor_y="center",
+                color=(*color, 0),
+            )
+            self._intro_labels.append({
+                "label": lbl,
+                "base_x": lx,
+                "base_y": ly,
+                "color": color,
+                "phase": i * 1.1,  # different sinusoidal phase per key
+            })
+
     # ── GUI menu callbacks ──────────────────────────────────
 
     def _gui_toggle_camera(self):
@@ -743,7 +835,7 @@ class SoulStreamApp(pyglet.window.Window):
         self.debug.enabled = not self.debug.enabled
 
     def _gui_toggle_help(self):
-        self.overlay.toggle_help()
+        self._show_float_keys()
         self.sound.play(AUDIO_HELP, volume=0.40)
 
     def _save_screenshot(self):
@@ -764,7 +856,27 @@ class SoulStreamApp(pyglet.window.Window):
         self.sound.cleanup()
         pyglet.clock.schedule_once(lambda dt: self._do_close(), min(dur, 2.0))
 
+    def _transition_to_intro(self):
+        """Transition from loading screen to intro state."""
+        self._state = STATE_INTRO
+        self._show_float_keys()
+        self.sound.play(AUDIO_START)
+        self.sound.start_ambience()
+        self.sound.play(AUDIO_HELP, volume=0.30)
+
     def on_key_press(self, symbol, modifiers):
+        # Loading screen: only ENTER proceeds
+        if self._state == STATE_LOADING:
+            if symbol == key.RETURN:
+                self._transition_to_intro()
+            return
+
+        # Intro state: ignore most keys, allow ESC
+        if self._state == STATE_INTRO:
+            if symbol == key.ESCAPE:
+                self._state = STATE_RUNNING
+            return
+
         if symbol == key.TAB:
             self.menu.sync_state(
                 use_camera=self.use_camera,
@@ -777,6 +889,9 @@ class SoulStreamApp(pyglet.window.Window):
             self.menu.toggle()
             return
         if symbol == key.ESCAPE:
+            if self.menu.visible:
+                self.menu.toggle()
+                return
             dur = self.sound.play_quit()
             self.sound.cleanup()
             # Delay close slightly so quit sound can be heard
@@ -801,7 +916,7 @@ class SoulStreamApp(pyglet.window.Window):
         elif symbol == key.S:
             self._save_screenshot()
         elif symbol == key.H:
-            self.overlay.toggle_help()
+            self._show_float_keys()
             self.sound.play(AUDIO_HELP, volume=0.40)
         elif symbol == key.LEFT:
             if not self.use_camera:
@@ -821,6 +936,10 @@ class SoulStreamApp(pyglet.window.Window):
         self.menu.on_mouse_motion(x, y)
 
     def on_mouse_press(self, x, y, button, modifiers):
+        if self._state == STATE_LOADING:
+            # Click anywhere to start
+            self._transition_to_intro()
+            return
         self.menu.on_mouse_press(x, y, button)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
@@ -846,6 +965,36 @@ class SoulStreamApp(pyglet.window.Window):
         # Reposition clock
         self._clock_label.x = width - 10
 
+        # Reposition loading screen
+        if self._loading_bg_sprite:
+            img = self._loading_bg_sprite.image
+            sx = width / img.width
+            sy = height / img.height
+            scale = max(sx, sy)
+            self._loading_bg_sprite.scale = scale
+            self._loading_bg_sprite.x = (width - img.width * scale) / 2
+            self._loading_bg_sprite.y = (height - img.height * scale) / 2
+        self._loading_overlay.width = width
+        self._loading_overlay.height = height
+        self._loading_title.x = width // 2
+        self._loading_title.y = height // 2 + 60
+        self._loading_subtitle.x = width // 2
+        self._loading_subtitle.y = height // 2 - 10
+        self._loading_version.x = width // 2
+        self._loading_start.x = width // 2
+        self._loading_start.y = height // 2 - 80
+
+        # Reposition intro floating key labels
+        for i, entry in enumerate(self._intro_labels):
+            col = i % 3
+            row = i // 3
+            lx = int(width * (0.2 + col * 0.3))
+            ly = int(height * (0.6 - row * 0.25))
+            entry["base_x"] = lx
+            entry["base_y"] = ly
+            entry["label"].x = lx
+            entry["label"].y = ly
+
         # Recreate the GUI menu at the new dimensions
         self.menu = GameMenu(width, height, callbacks={
             "toggle_camera": self._gui_toggle_camera,
@@ -864,11 +1013,97 @@ class SoulStreamApp(pyglet.window.Window):
         self._is_fullscreen = not self._is_fullscreen
         self.set_fullscreen(self._is_fullscreen)
 
+    def _draw_loading(self, dt):
+        """Draw the loading/title screen."""
+        self._loading_time += dt
+
+        # Draw background image scaled to fill window
+        if self._loading_bg_sprite:
+            self._loading_bg_sprite.draw()
+
+        # Dark overlay for readability
+        self._loading_overlay.draw()
+
+        # Title, subtitle, version
+        self._loading_title.draw()
+        self._loading_subtitle.draw()
+        self._loading_version.draw()
+
+        # Pulsing "PRESS ENTER" text
+        pulse = int((math.sin(self._loading_time * 2.5) * 0.5 + 0.5) * 255)
+        self._loading_start.color = (200, 168, 78, pulse)
+        self._loading_start.draw()
+
+    def _show_float_keys(self):
+        """Start (or restart) the floating key help animation."""
+        self._float_keys_timer = 0.0
+        self._float_keys_active = True
+
+    def _draw_float_keys(self, dt):
+        """Draw floating key labels with fade and drift. Returns True while active."""
+        if not self._float_keys_active:
+            return False
+
+        self._float_keys_timer += dt
+        t = self._float_keys_timer
+
+        # Fade in 0-1s, full 1-4s, fade out 4-5s
+        if t < 1.0:
+            alpha_factor = t
+        elif t < 4.0:
+            alpha_factor = 1.0
+        elif t < INTRO_DURATION:
+            alpha_factor = max(0.0, 1.0 - (t - 4.0))
+        else:
+            self._float_keys_active = False
+            return False
+
+        for entry in self._intro_labels:
+            lbl = entry["label"]
+            r, g, b = entry["color"]
+            y_offset = math.sin(t * 1.5 + entry["phase"]) * 12.0
+            lbl.x = entry["base_x"]
+            lbl.y = int(entry["base_y"] + y_offset)
+            lbl.color = (r, g, b, int(alpha_factor * 230))
+            lbl.draw()
+        return True
+
+    def _draw_intro(self, dt):
+        """Draw particle system + floating help keys during intro."""
+        # Run the normal particle simulation
+        now = time.monotonic()
+        self.mode_ctrl.update_image(now)
+        self.particles.spawn(self.image_source, self.mode_ctrl.is_ember)
+        self.particles.update(dt, self.mode_ctrl.is_ember)
+        self.sound.update(self.mode_ctrl.is_ember)
+
+        gpu_data = self.particles.pack_gpu()
+        n = self.particles.count
+        if n > 0:
+            data_bytes = gpu_data.tobytes()
+            self._vbo.orphan()
+            self._vbo.write(data_bytes)
+            self._vao.render(moderngl.POINTS, vertices=n)
+
+        # Draw floating keys; transition when done
+        if not self._draw_float_keys(dt):
+            self._state = STATE_RUNNING
+
     def on_draw(self):
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
 
-        now = time.monotonic()
         dt = 1.0 / 60.0
+
+        if self._state == STATE_LOADING:
+            self._draw_loading(dt)
+            return
+
+        if self._state == STATE_INTRO:
+            self._draw_intro(dt)
+            return
+
+        # --- STATE_RUNNING (original logic) ---
+        now = time.monotonic()
 
         if self.use_camera and self.camera:
             # Camera path: motion-based mode switching + hand gestures
@@ -941,10 +1176,13 @@ class SoulStreamApp(pyglet.window.Window):
                     self._hand_label.text = "Hand: not detected"
                 self._hand_label.draw()
 
-        # Soul overlay (banners, quotes, help)
+        # Soul overlay (banners, quotes)
         image_name = None if self.use_camera else self.image_source.image_name
         self.overlay.update(dt, self.mode_ctrl.is_ember, image_name)
         self.overlay.draw()
+
+        # Floating key help (triggered by H key)
+        self._draw_float_keys(dt)
 
         # Wall clock (bottom-right)
         now_str = datetime.now().strftime("%H:%M:%S")
