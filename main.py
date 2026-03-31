@@ -9,7 +9,8 @@ from pyglet.window import key
 import moderngl
 
 from image_source import ImageSource
-from particles import ParticleSystem, MAX_PARTICLES
+import particles as _particles_mod
+from particles import ParticleSystem, MAX_PARTICLES, SPAWN_PER_FRAME
 from gui import GameMenu
 
 WIDTH, HEIGHT = 1280, 720
@@ -35,6 +36,8 @@ AUDIO_QUIT = "thank-you-dark-souls.mp3"                     # ESC quit
 AUDIO_MODE_CYCLE = "darksouls-pain.mp3"                     # SPACE mode cycle
 AUDIO_BOSS_OUT = "bossout.mp3"                              # Palm ember burst
 AUDIO_START = "i-offer-you-an-accord.mp3"                   # Loading -> intro transition
+AUDIO_PRAISE_SUN = "bossout.mp3"                            # Praise the Sun pose
+AUDIO_YOU_DIED = "you-died-dark-souls.mp3"                  # Point Down / YOU DIED pose
 
 OPENING_VOLUME = 0.25
 SFX_VOLUME = 0.60
@@ -66,7 +69,7 @@ class SoundManager:
         # Load all one-shot sounds
         for name in (AUDIO_EMBER_IGNITE, AUDIO_HUMANITY_RESTORED, AUDIO_BONFIRE_LIT,
                      AUDIO_CAMERA_ON, AUDIO_HELP, AUDIO_QUIT, AUDIO_MODE_CYCLE,
-                     AUDIO_BOSS_OUT, AUDIO_START):
+                     AUDIO_BOSS_OUT, AUDIO_START, AUDIO_YOU_DIED):
             src = self._load_source(name)
             if src is not None:
                 self._sounds[name] = src
@@ -643,6 +646,186 @@ class SoulOverlay:
                 lbl.draw()
 
 
+# --- Pose Overlays ---
+
+# Maps pose name → (gesture image filename, display label, banner text, audio file)
+_POSE_INFO = {
+    'praise_sun': ("praise_the_sun.png", "Praise the Sun",    "PRAISE THE SUN!",        AUDIO_PRAISE_SUN),
+    'point_down': ("_point_down.png",    "Point Down",         "YOU DIED",               AUDIO_YOU_DIED),
+    'point_up':   ("_point_up.png",      "Point Up",           "SEEK THE DARK SOUL",     "firekeeper.mp3"),
+    'bow':        ("_bow.png",           "Bow",                "I HAVE FAILED...",       "dark-souls-im-sorry.mp3"),
+    'wave':       ("_wave.png",          "Wave",               "FAREWELL, UNKINDLED",    "hello-darksoul3.mp3"),
+    'welcome':    ("welcome.png",        "Welcome",            "WELCOME, UNDEAD",        "i-offer-you-an-accord.mp3"),
+    'applause':   ("applause.png",       "Applause",           "MAGNIFICENT!",           "darksoul_bonfire_jump.mp3"),
+}
+
+_GESTURE_DISPLAY_H = 150    # target display height in pixels
+_GESTURE_PADDING   = 20     # distance from window edges
+_GESTURE_TEXT_GAP  = 8      # gap between image bottom and label
+_GESTURE_FADE_IN   = 0.4
+_GESTURE_HOLD      = 3.2
+_GESTURE_FADE_OUT  = 0.9
+_GESTURE_TOTAL     = _GESTURE_FADE_IN + _GESTURE_HOLD + _GESTURE_FADE_OUT
+
+
+class GestureCornerOverlay:
+    """Top-right corner gesture image + pose name label.
+    Images are 129×172 RGBA sprites loaded once; only position/opacity changes at runtime.
+    """
+
+    GESTURE_DIR = os.path.join(IMAGE_DIR, "gesture")
+
+    def __init__(self, win_w, win_h):
+        self._sprites = {}      # pose_name → sprite (created once in __init__)
+        self._positions = {}    # pose_name → (sprite_x, sprite_y, label_x, label_y)
+        self._current = None
+        self._timer = 0.0
+        self._active = False
+        self._win_w = win_w
+        self._win_h = win_h
+
+        # Single reused label — text updated in show()
+        self._label = pyglet.text.Label(
+            "", font_name="Georgia", font_size=15,
+            x=0, y=0,
+            anchor_x="center", anchor_y="top",
+            color=(200, 168, 78, 0),
+        )
+
+        self._load_sprites()
+        self._calc_positions(win_w, win_h)
+
+    def _load_sprites(self):
+        for pose, (filename, *_) in _POSE_INFO.items():
+            path = os.path.join(self.GESTURE_DIR, filename)
+            try:
+                img = pyglet.image.load(path)
+                sprite = pyglet.sprite.Sprite(img)
+                scale = _GESTURE_DISPLAY_H / img.height
+                sprite.scale = scale
+                self._sprites[pose] = sprite
+            except Exception as e:
+                print(f"[GestureOverlay] Could not load {filename}: {e}")
+
+    def _calc_positions(self, win_w, win_h):
+        """Pre-compute top-right corner positions for each sprite."""
+        for pose, sprite in self._sprites.items():
+            sw = sprite.image.width * sprite.scale
+            sh = sprite.image.height * sprite.scale
+            sx = win_w - _GESTURE_PADDING - sw
+            sy = win_h - _GESTURE_PADDING - sh
+            label_x = sx + sw / 2
+            label_y = sy - _GESTURE_TEXT_GAP
+            self._positions[pose] = (int(sx), int(sy), label_x, label_y)
+
+    def show(self, pose_name):
+        if pose_name not in self._sprites:
+            return
+        self._current = pose_name
+        self._timer = 0.0
+        self._active = True
+        # Pre-apply position to sprite and label
+        sx, sy, lx, ly = self._positions[pose_name]
+        self._sprites[pose_name].x = sx
+        self._sprites[pose_name].y = sy
+        self._label.x = lx
+        self._label.y = ly
+        self._label.text = _POSE_INFO[pose_name][1]   # display label
+
+    def update(self, dt):
+        if self._active:
+            self._timer += dt
+            if self._timer >= _GESTURE_TOTAL:
+                self._active = False
+
+    def resize(self, win_w, win_h):
+        self._win_w = win_w
+        self._win_h = win_h
+        self._calc_positions(win_w, win_h)
+        # Re-apply position if currently showing
+        if self._active and self._current and self._current in self._positions:
+            sx, sy, lx, ly = self._positions[self._current]
+            self._sprites[self._current].x = sx
+            self._sprites[self._current].y = sy
+            self._label.x = lx
+            self._label.y = ly
+
+    def draw(self):
+        if not self._active or self._current not in self._sprites:
+            return
+        t = self._timer
+        if t < _GESTURE_FADE_IN:
+            alpha = t / _GESTURE_FADE_IN
+        elif t < _GESTURE_FADE_IN + _GESTURE_HOLD:
+            alpha = 1.0
+        elif t < _GESTURE_TOTAL:
+            alpha = 1.0 - (t - _GESTURE_FADE_IN - _GESTURE_HOLD) / _GESTURE_FADE_OUT
+        else:
+            return
+        alpha = max(0.0, min(1.0, alpha))
+        a_int = int(alpha * 230)
+        self._sprites[self._current].opacity = a_int
+        self._sprites[self._current].draw()
+        self._label.color = (200, 168, 78, int(alpha * 220))
+        self._label.draw()
+
+
+_YOU_DIED_DURATION = 4.0
+_YOU_DIED_FADE_IN  = 0.8
+_YOU_DIED_HOLD     = 2.4
+_YOU_DIED_FADE_OUT = 0.8
+
+
+class YouDiedOverlay:
+    """Full-screen blood-red "YOU DIED" overlay, Dark Souls style."""
+
+    def __init__(self, win_w, win_h):
+        self._bg = pyglet.shapes.Rectangle(0, 0, win_w, win_h, color=(60, 0, 0))
+        self._bg.opacity = 0
+        self._label = pyglet.text.Label(
+            "YOU DIED", font_name="Georgia", font_size=80,
+            x=win_w // 2, y=win_h // 2,
+            anchor_x="center", anchor_y="center",
+            color=(200, 20, 20, 0),
+        )
+        self._timer = 0.0
+        self._active = False
+
+    def trigger(self):
+        self._timer = 0.0
+        self._active = True
+
+    def update(self, dt):
+        if self._active:
+            self._timer += dt
+            if self._timer >= _YOU_DIED_DURATION:
+                self._active = False
+
+    def resize(self, win_w, win_h):
+        self._bg.width = win_w
+        self._bg.height = win_h
+        self._label.x = win_w // 2
+        self._label.y = win_h // 2
+
+    def draw(self):
+        if not self._active:
+            return
+        t = self._timer
+        if t < _YOU_DIED_FADE_IN:
+            alpha = t / _YOU_DIED_FADE_IN
+        elif t < _YOU_DIED_FADE_IN + _YOU_DIED_HOLD:
+            alpha = 1.0
+        elif t < _YOU_DIED_DURATION:
+            alpha = 1.0 - (t - _YOU_DIED_FADE_IN - _YOU_DIED_HOLD) / _YOU_DIED_FADE_OUT
+        else:
+            return
+        alpha = max(0.0, min(1.0, alpha))
+        self._bg.opacity = int(alpha * 140)
+        self._bg.draw()
+        self._label.color = (200, 20, 20, int(alpha * 255))
+        self._label.draw()
+
+
 # --- Main Application ---
 
 class SoulStreamApp(pyglet.window.Window):
@@ -668,6 +851,7 @@ class SoulStreamApp(pyglet.window.Window):
         self.image_source = ImageSource(IMAGE_DIR, WIDTH, HEIGHT)
         self.use_camera = False
         self.camera = None  # Lazy-initialized on C key
+        self._source_transition = 0.0  # countdown timer for spawn ramp-up
 
         self.particles = ParticleSystem()
         self.mode_ctrl = ModeController()
@@ -675,6 +859,12 @@ class SoulStreamApp(pyglet.window.Window):
         self.overlay = SoulOverlay()
         self.sound = SoundManager()
         self._prev_palm_open = False
+
+        # Pose detection state
+        self._gesture_overlay = GestureCornerOverlay(WIDTH, HEIGHT)
+        self._you_died_overlay = YouDiedOverlay(WIDTH, HEIGHT)
+        self._prev_pose = None
+        self._pose_cooldown = 0.0
 
         # Load particle shaders
         with open(os.path.join(SHADER_DIR, "particle.vert")) as f:
@@ -805,11 +995,14 @@ class SoulStreamApp(pyglet.window.Window):
     def _gui_toggle_camera(self):
         if self.use_camera:
             self.use_camera = False
+            self._source_transition = 1.5
         else:
             if self.camera is None:
                 from camera import Camera
                 self.camera = Camera()
+                self.overlay.trigger_banner("KINDLING CAMERA...", (255, 160, 40))
             self.use_camera = True
+            self._source_transition = 1.5
             self.sound.play(AUDIO_CAMERA_ON)
 
     def _gui_prev_image(self):
@@ -855,6 +1048,35 @@ class SoulStreamApp(pyglet.window.Window):
         dur = self.sound.play_quit()
         self.sound.cleanup()
         pyglet.clock.schedule_once(lambda dt: self._do_close(), min(dur, 2.0))
+
+    def _trigger_pose_effect(self, pose_name, pose_data):
+        """Fire gesture image, banner, sound, and particle effect for a detected pose."""
+        if pose_name not in _POSE_INFO:
+            return
+        _, _label, banner_text, audio_file = _POSE_INFO[pose_name]
+
+        # Always: show corner gesture image
+        self._gesture_overlay.show(pose_name)
+
+        # Always: trigger soul banner
+        if pose_name == 'point_down':
+            self.overlay.trigger_banner(banner_text, (220, 30, 30))
+        elif pose_name == 'praise_sun':
+            self.overlay.trigger_banner(banner_text, (255, 220, 50))
+        elif pose_name == 'bow':
+            self.overlay.trigger_banner(banner_text, (180, 180, 200))
+        else:
+            self.overlay.trigger_banner(banner_text, (200, 168, 78))
+
+        # Always: play associated sound
+        self.sound.play(audio_file, volume=0.55)
+
+        # Pose-specific particle + screen effects
+        if pose_name == 'praise_sun':
+            self.particles.spawn_praise_sun(pose_data.left_wrist_ndc, pose_data.right_wrist_ndc)
+        elif pose_name == 'point_down':
+            self._you_died_overlay.trigger()
+            self.particles.spawn_you_died()
 
     def _transition_to_intro(self):
         """Transition from loading screen to intro state."""
@@ -905,11 +1127,14 @@ class SoulStreamApp(pyglet.window.Window):
             # Toggle camera mode (lazy-init webcam)
             if self.use_camera:
                 self.use_camera = False
+                self._source_transition = 1.5
             else:
                 if self.camera is None:
                     from camera import Camera
                     self.camera = Camera()
+                    self.overlay.trigger_banner("KINDLING CAMERA...", (255, 160, 40))
                 self.use_camera = True
+                self._source_transition = 1.5
                 self.sound.play(AUDIO_CAMERA_ON)
         elif symbol == key.F11:
             self._toggle_fullscreen()
@@ -994,6 +1219,10 @@ class SoulStreamApp(pyglet.window.Window):
             entry["base_y"] = ly
             entry["label"].x = lx
             entry["label"].y = ly
+
+        # Resize pose overlays
+        self._you_died_overlay.resize(width, height)
+        self._gesture_overlay.resize(width, height)
 
         # Recreate the GUI menu at the new dimensions
         self.menu = GameMenu(width, height, callbacks={
@@ -1105,21 +1334,43 @@ class SoulStreamApp(pyglet.window.Window):
         # --- STATE_RUNNING (original logic) ---
         now = time.monotonic()
 
+        # Source transition: ramp spawn rate from 50 -> 150 over 1.5s
+        if self._source_transition > 0.0:
+            self._source_transition = max(0.0, self._source_transition - dt)
+            t = 1.0 - self._source_transition / 1.5  # 0..1
+            _particles_mod.SPAWN_PER_FRAME = int(50 + 100 * t)
+        else:
+            _particles_mod.SPAWN_PER_FRAME = SPAWN_PER_FRAME
+
         if self.use_camera and self.camera:
-            # Camera path: motion-based mode switching + hand gestures
-            brightness, motion, avg_motion = self.camera.get_data()
-            hand_data = self.camera.get_hand_data()
-            self.mode_ctrl.update_camera(avg_motion, now, hand_data.is_open_palm)
-            self.particles.spawn_camera(brightness, motion, self.mode_ctrl.is_ember)
-            if hand_data.detected and hand_data.is_open_palm:
-                self.particles.recolor_fire_gradient(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
-                self.particles.spawn_palm_sparks(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
-                # Play palm burst sound on open palm transition
-                if not self._prev_palm_open:
-                    self.sound.play(AUDIO_BOSS_OUT, volume=0.35)
-                self._prev_palm_open = True
+            if not self.camera.ready:
+                # Camera still initializing — keep spawning from image source
+                self.mode_ctrl.update_image(now)
+                self.particles.spawn(self.image_source, self.mode_ctrl.is_ember)
             else:
-                self._prev_palm_open = False
+                # Camera path: motion-based mode switching + hand gestures
+                brightness, motion, avg_motion = self.camera.get_data()
+                hand_data = self.camera.get_hand_data()
+                self.mode_ctrl.update_camera(avg_motion, now, hand_data.is_open_palm)
+                self.particles.spawn_camera(brightness, motion, self.mode_ctrl.is_ember)
+                if hand_data.detected and hand_data.is_open_palm:
+                    self.particles.kindle_nearby(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
+                    self.particles.spawn_palm_sparks(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
+                    # Play palm burst sound on open palm transition
+                    if not self._prev_palm_open:
+                        self.sound.play(AUDIO_BOSS_OUT, volume=0.35)
+                    self._prev_palm_open = True
+                else:
+                    self._prev_palm_open = False
+
+                # Body pose detection
+                pose_data = self.camera.get_pose_data()
+                self._pose_cooldown = max(0.0, self._pose_cooldown - dt)
+                pose_name = pose_data.pose if pose_data.detected else None
+                if pose_name and pose_name != self._prev_pose and self._pose_cooldown <= 0:
+                    self._trigger_pose_effect(pose_name, pose_data)
+                    self._pose_cooldown = 5.0
+                self._prev_pose = pose_name
         else:
             # Image path: time-based mode cycling
             self.mode_ctrl.update_image(now)
@@ -1127,6 +1378,8 @@ class SoulStreamApp(pyglet.window.Window):
 
         self.particles.update(dt, self.mode_ctrl.is_ember)
         self.sound.update(self.mode_ctrl.is_ember)
+        self._you_died_overlay.update(dt)
+        self._gesture_overlay.update(dt)
 
         # Pack and upload to GPU
         gpu_data = self.particles.pack_gpu()
@@ -1136,6 +1389,9 @@ class SoulStreamApp(pyglet.window.Window):
             self._vbo.orphan()
             self._vbo.write(data_bytes)
             self._vao.render(moderngl.POINTS, vertices=n)
+
+        # Pose: YOU DIED overlay (rendered over particles, under HUD)
+        self._you_died_overlay.draw()
 
         # Debug overlay + HUD
         if self.debug.enabled:
@@ -1180,6 +1436,9 @@ class SoulStreamApp(pyglet.window.Window):
         image_name = None if self.use_camera else self.image_source.image_name
         self.overlay.update(dt, self.mode_ctrl.is_ember, image_name)
         self.overlay.draw()
+
+        # Pose: gesture image in top-right corner with pose name label
+        self._gesture_overlay.draw()
 
         # Floating key help (triggered by H key)
         self._draw_float_keys(dt)

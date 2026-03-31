@@ -157,13 +157,13 @@ class ParticleSystem:
         if slots <= 0:
             return
 
-        n = min(30, slots)
+        n = min(15, slots)
 
         s = self.count
         e = s + n
 
-        self.pos_x[s:e] = palm_ndc_x + np.random.uniform(-0.05, 0.05, n).astype(np.float32)
-        self.pos_y[s:e] = palm_ndc_y + np.random.uniform(-0.05, 0.05, n).astype(np.float32)
+        self.pos_x[s:e] = palm_ndc_x + np.random.uniform(-0.03, 0.03, n).astype(np.float32)
+        self.pos_y[s:e] = palm_ndc_y + np.random.uniform(-0.03, 0.03, n).astype(np.float32)
 
         self.vel_x[s:e] = np.random.uniform(-0.10, 0.10, n).astype(np.float32)
         self.vel_y[s:e] = np.random.uniform(0.15, 0.50, n).astype(np.float32)
@@ -183,28 +183,95 @@ class ParticleSystem:
 
         self.count = e
 
-    def recolor_fire_gradient(self, palm_ndc_x, palm_ndc_y):
+    def spawn_praise_sun(self, left_ndc, right_ndc, n_per_hand=60):
+        """Radial golden sun-ray burst from both raised wrists."""
+        for cx, cy in (left_ndc, right_ndc):
+            slots = MAX_PARTICLES - self.count
+            if slots <= 0:
+                return
+            n = min(n_per_hand, slots)
+            s, e = self.count, self.count + n
+
+            angles = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)
+            speeds = np.random.uniform(0.25, 0.9, n).astype(np.float32)
+
+            self.pos_x[s:e] = cx + np.random.uniform(-0.02, 0.02, n).astype(np.float32)
+            self.pos_y[s:e] = cy + np.random.uniform(-0.02, 0.02, n).astype(np.float32)
+            self.vel_x[s:e] = np.cos(angles) * speeds
+            self.vel_y[s:e] = np.sin(angles) * speeds
+
+            # Gold (#FFD700) → white-hot sparks (20%)
+            t = np.random.uniform(0, 1, n).astype(np.float32)
+            white = np.random.uniform(0, 1, n) < 0.20
+            self.color_r[s:e] = 1.0
+            self.color_g[s:e] = np.where(white, 1.0, 0.65 + t * 0.30).astype(np.float32)
+            self.color_b[s:e] = np.where(white, 0.9, 0.0).astype(np.float32)
+
+            life_vals = np.random.uniform(0.6, 1.8, n).astype(np.float32)
+            self.life[s:e] = life_vals
+            self.max_life[s:e] = life_vals
+            self._phase[s:e] = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)
+            self.count = e
+
+    def spawn_you_died(self, n=300):
+        """Blood-red particles cascading down — YOU DIED effect."""
+        slots = MAX_PARTICLES - self.count
+        if slots <= 0:
+            return
+        n = min(n, slots)
+        s, e = self.count, self.count + n
+
+        # Spawn scattered across upper portion of screen
+        self.pos_x[s:e] = np.random.uniform(-1.0, 1.0, n).astype(np.float32)
+        self.pos_y[s:e] = np.random.uniform(0.1, 1.0, n).astype(np.float32)
+
+        # Fall downward, slight horizontal drift
+        self.vel_x[s:e] = np.random.uniform(-0.04, 0.04, n).astype(np.float32)
+        self.vel_y[s:e] = np.random.uniform(-0.6, -0.1, n).astype(np.float32)
+
+        # Deep crimson / blood red
+        self.color_r[s:e] = np.random.uniform(0.7, 1.0, n).astype(np.float32)
+        self.color_g[s:e] = np.random.uniform(0.0, 0.08, n).astype(np.float32)
+        self.color_b[s:e] = np.random.uniform(0.0, 0.04, n).astype(np.float32)
+
+        life_vals = np.random.uniform(1.2, 3.5, n).astype(np.float32)
+        self.life[s:e] = life_vals
+        self.max_life[s:e] = life_vals
+        self._phase[s:e] = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)
+        self.count = e
+
+    def kindle_nearby(self, palm_x, palm_y, radius=0.3):
+        """Warm particles near the palm toward ember colors + gentle pull."""
         if self.count == 0:
             return
 
         n = self.count
-        dx = self.pos_x[:n] - palm_ndc_x
-        dy = self.pos_y[:n] - palm_ndc_y
+        dx = self.pos_x[:n] - palm_x
+        dy = self.pos_y[:n] - palm_y
         dist = np.sqrt(dx * dx + dy * dy)
 
-        # Normalize distance: t = clamp(dist / 1.0, 0, 1)
-        t = np.clip(dist, 0.0, 1.0)
+        # Only affect particles within radius
+        mask = dist < radius
+        if not np.any(mask):
+            return
 
-        # Hermite interpolation on green channel: smooth fire gradient
-        # Near palm (t=0): yellow (1.0, 1.0, 0.0)
-        # Far from palm (t=1): deep red (1.0, 0.27, 0.0)
-        # g = 1.0 - 0.73 * (3t^2 - 2t^3)
-        hermite = 3.0 * t * t - 2.0 * t * t * t
-        g = 1.0 - 0.73 * hermite
+        # Blend factor: 1.0 at palm center, 0.0 at edge of radius
+        t = np.zeros(n, dtype=np.float32)
+        t[mask] = 1.0 - dist[mask] / radius
 
-        self.color_r[:n] = 1.0
-        self.color_g[:n] = g.astype(np.float32)
-        self.color_b[:n] = 0.0
+        # Smooth blend with hermite curve for softer falloff
+        t_smooth = t * t * (3.0 - 2.0 * t)
+
+        # Ember target color: orange-gold (1.0, 0.65, 0.1)
+        blend = t_smooth * 0.6  # max 60% blend so original colors show through
+        self.color_r[:n] = self.color_r[:n] * (1.0 - blend) + 1.0 * blend
+        self.color_g[:n] = self.color_g[:n] * (1.0 - blend) + 0.65 * blend
+        self.color_b[:n] = self.color_b[:n] * (1.0 - blend) + 0.1 * blend
+
+        # Gentle gravitational pull toward palm (only affected particles)
+        pull_strength = t_smooth * 0.15
+        self.vel_x[:n] -= dx * pull_strength
+        self.vel_y[:n] -= dy * pull_strength
 
     def update(self, dt, is_ember=False):
         if self.count == 0:

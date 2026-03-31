@@ -3,15 +3,16 @@ import cv2
 import numpy as np
 
 from hand_tracker import HandTracker, HandData
+from pose_tracker import PoseTracker, PoseData
 
 CAPTURE_W, CAPTURE_H = 80, 60
 
 
 class Camera:
     def __init__(self, device=0):
-        self._cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        self._device = device
+        self._cap = None
+        self._ready = False
 
         self._lock = threading.Lock()
         self._brightness = np.zeros((CAPTURE_H, CAPTURE_W), dtype=np.float32)
@@ -25,17 +26,31 @@ class Camera:
         self._hand_data = HandData()
         self._hand_ema = 0.0
 
+        self._pose_tracker = PoseTracker()
+        self._pose_data = PoseData()
+
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
 
+    @property
+    def ready(self):
+        with self._lock:
+            return self._ready
+
     def _capture_loop(self):
+        # Open camera in background thread (avoids blocking main thread)
+        self._cap = cv2.VideoCapture(self._device, cv2.CAP_DSHOW)
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+
         while self._running:
             ok, frame = self._cap.read()
             if not ok:
                 continue
 
-            # Hand tracking on full 320x240 frame before resize
+            # Hand and pose tracking on full 320x240 frame before resize
             hand_data = self._hand_tracker.process(frame)
+            pose_data = self._pose_tracker.process(frame)
 
             small = cv2.resize(frame, (CAPTURE_W, CAPTURE_H), interpolation=cv2.INTER_AREA)
             gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
@@ -59,6 +74,8 @@ class Camera:
                 self._preview = preview
                 self._hand_data = hand_data
                 self._hand_ema = getattr(self._hand_tracker, '_ema_confidence', 0.0)
+                self._pose_data = pose_data
+                self._ready = True
 
     def get_data(self):
         with self._lock:
@@ -72,6 +89,10 @@ class Camera:
         with self._lock:
             return self._hand_ema
 
+    def get_pose_data(self) -> PoseData:
+        with self._lock:
+            return self._pose_data
+
     def get_preview(self):
         with self._lock:
             return self._preview.copy()
@@ -80,4 +101,6 @@ class Camera:
         self._running = False
         self._thread.join(timeout=2.0)
         self._hand_tracker.close()
-        self._cap.release()
+        self._pose_tracker.close()
+        if self._cap is not None:
+            self._cap.release()
