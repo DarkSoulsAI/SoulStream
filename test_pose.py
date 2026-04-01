@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+
 """
 Pose estimator test — live webcam with skeleton + pose mapping debug.
 
@@ -158,6 +162,23 @@ def main():
     PANEL_W  = 260          # right-side debug panel width
     BAR_MAX  = 180          # max pixel length of EMA bar
 
+    PANEL_HEADER_H = 45     # pixels reserved for the "POSE DETECTOR" header
+    ROW_H          = 110    # icon_h(100) + gap(10)
+    scroll_y       = 0      # current scroll offset in pixels
+    SCROLL_STEP    = 30
+
+    def _on_mouse(event, x, y, flags, param):
+        nonlocal scroll_y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            scroll_y -= SCROLL_STEP if flags > 0 else -SCROLL_STEP
+            total_content_h = len(POSE_NAMES) * ROW_H
+            max_scroll = max(0, PANEL_HEADER_H + total_content_h - 720)
+            scroll_y = max(0, min(scroll_y, max_scroll))
+
+    WIN_NAME = "Pose Estimator Test  [Q/ESC = quit]"
+    cv2.namedWindow(WIN_NAME)
+    cv2.setMouseCallback(WIN_NAME, _on_mouse)
+
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -220,13 +241,16 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 168, 78), 1, cv2.LINE_AA)
         cv2.line(frame, (panel_x + 5, 36), (w - 5, 36), (80, 80, 80), 1)
 
-        row_h  = 100 + 10     # icon height + gap
         icon_x = panel_x + 10
 
         for idx, name in enumerate(POSE_NAMES):
             val      = ema[name]
             is_active = (name == active_pose)
-            row_y    = 45 + idx * row_h
+            row_y    = PANEL_HEADER_H + idx * ROW_H - scroll_y
+
+            # Skip rows fully outside the visible panel area
+            if row_y + ROW_H < PANEL_HEADER_H or row_y > h:
+                continue
 
             # Gesture icon
             if name in icons:
@@ -266,7 +290,7 @@ def main():
             cv2.putText(frame, "no pose", (20, 42),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 100, 100), 1, cv2.LINE_AA)
 
-        cv2.imshow("Pose Estimator Test  [Q/ESC = quit]", frame)
+        cv2.imshow(WIN_NAME, frame)
         key = cv2.waitKey(1) & 0xFF
         if key in (ord('q'), 27):
             break

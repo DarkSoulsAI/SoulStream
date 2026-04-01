@@ -150,8 +150,6 @@ class ImageSource:
 
     def grid_to_ndc(self, gy, gx):
         # Map grid coords to NDC, centered on screen
-        # Image is centered within 1280x720, so we need to account for letterboxing
-        # Grid cell size in screen pixels
         cell_w = self._fit_w / self.grid_w
         cell_h = self._fit_h / self.grid_h
 

@@ -9,7 +9,7 @@ CAPTURE_W, CAPTURE_H = 80, 60
 
 
 class Camera:
-    def __init__(self, device=0):
+    def __init__(self, device=0, enable_hand=True, enable_pose=True):
         self._device = device
         self._cap = None
         self._ready = False
@@ -22,11 +22,13 @@ class Camera:
         self._prev_gray = None
         self._running = True
 
-        self._hand_tracker = HandTracker()
+        self._enable_hand = enable_hand
+        self._hand_tracker = HandTracker() if enable_hand else None
         self._hand_data = HandData()
         self._hand_ema = 0.0
 
-        self._pose_tracker = PoseTracker()
+        self._enable_pose = enable_pose
+        self._pose_tracker = PoseTracker() if enable_pose else None
         self._pose_data = PoseData()
 
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -36,6 +38,30 @@ class Camera:
     def ready(self):
         with self._lock:
             return self._ready
+
+    @property
+    def hand_enabled(self) -> bool:
+        with self._lock:
+            return self._enable_hand
+
+    @hand_enabled.setter
+    def hand_enabled(self, value: bool):
+        with self._lock:
+            self._enable_hand = value
+            if value and self._hand_tracker is None:
+                self._hand_tracker = HandTracker()
+
+    @property
+    def pose_enabled(self) -> bool:
+        with self._lock:
+            return self._enable_pose
+
+    @pose_enabled.setter
+    def pose_enabled(self, value: bool):
+        with self._lock:
+            self._enable_pose = value
+            if value and self._pose_tracker is None:
+                self._pose_tracker = PoseTracker()
 
     def _capture_loop(self):
         # Open camera in background thread (avoids blocking main thread)
@@ -48,9 +74,13 @@ class Camera:
             if not ok:
                 continue
 
-            # Hand and pose tracking on full 320x240 frame before resize
-            hand_data = self._hand_tracker.process(frame)
-            pose_data = self._pose_tracker.process(frame)
+            # Only run enabled trackers
+            with self._lock:
+                run_hand = self._enable_hand
+                run_pose = self._enable_pose
+
+            hand_data = self._hand_tracker.process(frame) if (run_hand and self._hand_tracker) else HandData()
+            pose_data = self._pose_tracker.process(frame) if (run_pose and self._pose_tracker) else PoseData()
 
             small = cv2.resize(frame, (CAPTURE_W, CAPTURE_H), interpolation=cv2.INTER_AREA)
             gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
@@ -73,7 +103,7 @@ class Camera:
                 self._avg_motion = avg_m
                 self._preview = preview
                 self._hand_data = hand_data
-                self._hand_ema = getattr(self._hand_tracker, '_ema_confidence', 0.0)
+                self._hand_ema = getattr(self._hand_tracker, '_ema_confidence', 0.0) if self._hand_tracker else 0.0
                 self._pose_data = pose_data
                 self._ready = True
 
@@ -100,7 +130,9 @@ class Camera:
     def stop(self):
         self._running = False
         self._thread.join(timeout=2.0)
-        self._hand_tracker.close()
-        self._pose_tracker.close()
+        if self._hand_tracker:
+            self._hand_tracker.close()
+        if self._pose_tracker:
+            self._pose_tracker.close()
         if self._cap is not None:
             self._cap.release()

@@ -1,7 +1,9 @@
 import os
 from dataclasses import dataclass
 
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SRC_DIR)
+MODEL_PATH = os.path.join(_ROOT_DIR, "hand_landmarker.task")
 
 
 @dataclass
@@ -53,7 +55,6 @@ try:
             lm = result.hand_landmarks[0]  # list of 21 NormalizedLandmark
 
             # Open palm detection: all 5 fingers extended
-            # Fingers: tip y < mcp y (image coords, lower y = higher on screen)
             finger_states = {}
 
             fingers_extended = (

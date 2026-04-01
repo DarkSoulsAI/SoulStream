@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+
 """
 Hand tracker visual test — opens webcam and draws landmarks +
 open-palm detection state in real-time for debugging.

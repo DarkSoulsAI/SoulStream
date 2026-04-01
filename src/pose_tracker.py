@@ -2,7 +2,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pose_landmarker_lite.task")
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SRC_DIR)
+MODEL_PATH = os.path.join(_ROOT_DIR, "pose_landmarker_lite.task")
 
 # MediaPipe Pose landmark indices
 _NOSE           = 0

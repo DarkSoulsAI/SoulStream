@@ -51,9 +51,9 @@ class GuiButton:
         self.pressed = False
 
         # Toggle / radio support
-        self.toggle = toggle            # if True, stays highlighted when active
-        self.active = False             # current toggle state
-        self.group_value = group_value  # used for radio groups
+        self.toggle = toggle
+        self.active = False
+        self.group_value = group_value
 
         # Shapes (batch-drawn)
         self._bg = pyglet.shapes.Rectangle(x, y, w, h,
@@ -88,7 +88,6 @@ class GuiButton:
         self.pressed = False
 
     def draw(self):
-        # Decide colors
         if self.pressed:
             bg = COL_BTN_BG_PRESS
         elif self.hovered:
@@ -124,7 +123,7 @@ class GuiSlider:
     def __init__(self, x, y, w, label_text, value=0.5,
                  tooltip="", on_change=None):
         self.x, self.y, self.w = x, y, w
-        self.h = 28                        # total hit-area height
+        self.h = 28
         self.value = value
         self.tooltip = tooltip
         self.on_change = on_change
@@ -242,11 +241,13 @@ class GameMenu:
 
     Sections
     --------
-    Source  : [Camera ON/OFF]  [< Prev]  [Next >]
-    Mode    : [Auto]  [Humanity]  [Ember]          (radio)
-    Audio   : Volume slider
-    Tools   : [Debug]  [Help]
-    Quit    : [Quit]
+    Source         : [Camera ON/OFF]  [< Prev]  [Next >]
+    Camera Features: [Hand Track]  [Pose Detect]
+    Mode           : [Auto]  [Humanity]  [Ember]          (radio)
+    Visualization  : [Points] [Trails] [Skeleton] [Flow] [Shapes]  (radio)
+    Audio          : Volume slider
+    Tools          : [Debug]  [Help]
+    Quit           : [Quit]
     """
 
     def __init__(self, width, height, callbacks):
@@ -258,6 +259,8 @@ class GameMenu:
             Required keys:
                 toggle_camera, prev_image, next_image,
                 set_mode_auto, set_mode_humanity, set_mode_ember,
+                toggle_hand, toggle_pose,
+                set_viz,
                 set_volume, toggle_debug, toggle_help, quit
         """
         self.width = width
@@ -265,25 +268,21 @@ class GameMenu:
         self.visible = False
         self._callbacks = callbacks
 
-        # Tooltip state
         self._tooltip_text = ""
 
-        # Dim overlay behind menu
         self._dim = pyglet.shapes.Rectangle(0, 0, width, height,
                                             color=(0, 0, 0))
         self._dim.opacity = 140
 
         # ── Layout ────────────────────────────────────────────
         panel_w = 360
-        px = (width - panel_w) // 2      # panel left x
+        px = (width - panel_w) // 2
 
-        # Build from top to bottom — store y cursor
-        top = height // 2 + 190
-        row_h = 36
-        gap = 14
-        panel_pad = 32
+        top = height // 2 + 260
+        row_h = 32
+        gap = 10
+        panel_pad = 30
 
-        # Title
         self._title_label = pyglet.text.Label(
             "~ SOUL STREAM ~", font_name="Georgia", font_size=22,
             x=width // 2, y=top + 10,
@@ -291,7 +290,7 @@ class GameMenu:
             color=COL_BORDER,
         )
 
-        y = top - 30  # start below title
+        y = top - 26
 
         # ── Source panel ──────────────────────────────────────
         src_h = row_h + panel_pad
@@ -315,6 +314,25 @@ class GameMenu:
             callback=callbacks["next_image"],
         )
         y -= src_h + gap
+
+        # ── Camera Features panel ─────────────────────────────
+        cam_h = row_h + panel_pad
+        self._cam_panel = GuiPanel(px, y - cam_h, panel_w, cam_h, "Camera Features")
+        btn_y = y - cam_h + 10
+        bw2 = (panel_w - 30) // 2
+        self._btn_hand = GuiButton(
+            px + 10, btn_y, bw2, row_h, "Hand Track",
+            tooltip="Toggle hand tracker (key: H) — saves CPU when off",
+            callback=callbacks["toggle_hand"],
+            toggle=True,
+        )
+        self._btn_pose = GuiButton(
+            px + 20 + bw2, btn_y, bw2, row_h, "Pose Detect",
+            tooltip="Toggle pose detector (key: P) — saves CPU when off",
+            callback=callbacks["toggle_pose"],
+            toggle=True,
+        )
+        y -= cam_h + gap
 
         # ── Mode panel ────────────────────────────────────────
         mode_h = row_h + panel_pad
@@ -340,8 +358,26 @@ class GameMenu:
             toggle=True, group_value=2,
         )
         self._mode_buttons = [self._btn_auto, self._btn_humanity, self._btn_ember]
-        self._btn_auto.active = True  # default
+        self._btn_auto.active = True
         y -= mode_h + gap
+
+        # ── Visualization panel ───────────────────────────────
+        viz_h = row_h + panel_pad
+        self._viz_panel = GuiPanel(px, y - viz_h, panel_w, viz_h, "Visualization")
+        btn_y = y - viz_h + 10
+        viz_labels = ["Points", "Trails", "Skel", "Flow", "Shapes"]
+        bv = (panel_w - 20) // 5 - 2
+        self._viz_buttons = []
+        for i, lbl in enumerate(viz_labels):
+            btn = GuiButton(
+                px + 10 + i * (bv + 2), btn_y, bv, row_h, lbl,
+                tooltip=f"Visualization: {['Point cloud', 'Particle trails', 'Skeleton glow', 'Flow field', 'Shape sigils'][i]} (key: {i+1})",
+                callback=(lambda idx=i: callbacks["set_viz"](idx)),
+                toggle=True, group_value=i,
+            )
+            self._viz_buttons.append(btn)
+        self._viz_buttons[0].active = True
+        y -= viz_h + gap
 
         # ── Audio panel ───────────────────────────────────────
         audio_h = 60 + panel_pad
@@ -358,7 +394,6 @@ class GameMenu:
         tools_h = row_h + panel_pad
         self._tools_panel = GuiPanel(px, y - tools_h, panel_w, tools_h, "Tools")
         btn_y = y - tools_h + 10
-        bw2 = (panel_w - 30) // 2
         self._btn_debug = GuiButton(
             px + 10, btn_y, bw2, row_h, "Debug",
             tooltip="Toggle debug overlay with camera preview & stats (key: D)",
@@ -367,7 +402,7 @@ class GameMenu:
         )
         self._btn_help = GuiButton(
             px + 20 + bw2, btn_y, bw2, row_h, "Help",
-            tooltip="Show help panel with controls & lore (key: H)",
+            tooltip="Show help panel with controls & lore (key: F1)",
             callback=callbacks["toggle_help"],
             toggle=True,
         )
@@ -395,22 +430,25 @@ class GameMenu:
             color=(180, 170, 150, 200),
         )
 
-        # Collect all interactive elements for iteration
+        # Collect all interactive elements
         self._buttons = [
             self._btn_camera, self._btn_prev, self._btn_next,
+            self._btn_hand, self._btn_pose,
             self._btn_auto, self._btn_humanity, self._btn_ember,
+            *self._viz_buttons,
             self._btn_debug, self._btn_help,
             self._btn_quit,
         ]
         self._panels = [
-            self._source_panel, self._mode_panel,
-            self._audio_panel, self._tools_panel,
+            self._source_panel, self._cam_panel, self._mode_panel,
+            self._viz_panel, self._audio_panel, self._tools_panel,
         ]
 
     # ── public sync helpers ───────────────────────────────────
 
     def sync_state(self, *, use_camera=False, mode=0,
-                   debug=False, help_visible=False, volume=0.25):
+                   debug=False, help_visible=False, volume=0.25,
+                   hand_enabled=True, pose_enabled=True, viz_mode=0):
         """Sync button active states with app state."""
         self._btn_camera.active = use_camera
         for btn in self._mode_buttons:
@@ -418,6 +456,10 @@ class GameMenu:
         self._btn_debug.active = debug
         self._btn_help.active = help_visible
         self._slider_vol.value = volume
+        self._btn_hand.active = hand_enabled
+        self._btn_pose.active = pose_enabled
+        for btn in self._viz_buttons:
+            btn.active = (btn.group_value == viz_mode)
 
     # ── event handlers ────────────────────────────────────────
 
@@ -438,25 +480,24 @@ class GameMenu:
             self._tooltip_text = self._slider_vol.tooltip
 
     def on_mouse_press(self, mx, my, button):
-        """Returns True if the click was consumed by the menu."""
         if not self.visible:
             return False
-        # Slider
         if self._slider_vol.hit_test(mx, my):
             self._slider_vol.begin_drag(mx)
             return True
-        # Buttons
         for btn in self._buttons:
             if btn.hit_test(mx, my):
                 btn.on_press()
-                # Radio group logic for mode buttons
                 if btn in self._mode_buttons:
                     for b in self._mode_buttons:
+                        b.active = (b is btn)
+                elif btn in self._viz_buttons:
+                    for b in self._viz_buttons:
                         b.active = (b is btn)
                 elif btn.toggle:
                     btn.active = not btn.active
                 return True
-        return True  # consume all clicks when menu is open
+        return True
 
     def on_mouse_drag(self, mx, my):
         if not self.visible:
@@ -476,24 +517,17 @@ class GameMenu:
         if not self.visible:
             return
 
-        # Dim background
         self._dim.draw()
-
-        # Title
         self._title_label.draw()
 
-        # Panels
         for panel in self._panels:
             panel.draw()
 
-        # Buttons
         for btn in self._buttons:
             btn.draw()
 
-        # Slider
         self._slider_vol.draw()
 
-        # Tooltip
         if self._tooltip_text:
             self._tooltip_bg.draw()
             self._tooltip_label.text = self._tooltip_text
