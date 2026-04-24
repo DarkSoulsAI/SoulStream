@@ -1,5 +1,5 @@
-opencv-python
-pyglet
-moderngl
-numpy
-mediapipe
+opencv-python>=4.8,<4.11
+pyglet>=2.0,<3.0
+moderngl>=5.10,<6.0
+numpy>=1.24,<2.0
+mediapipe>=0.10.9,<0.11

@@ -109,7 +109,7 @@ except (ImportError, Exception) as e:
 
     class HandTracker:
         def __init__(self):
-            pass
+            self._ema_confidence = 0.0
 
         def process(self, frame_bgr) -> HandData:
             return HandData()

@@ -9,10 +9,13 @@ Controls:
   Q / ESC  quit
 """
 
+import argparse
 import os
 import cv2
 import numpy as np
 import mediapipe as mp
+
+from hand_tracker import HandTracker, HandData
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pose_landmarker_lite.task")
 GESTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image", "gesture")
@@ -104,6 +107,56 @@ def lm_px(lm_point, w, h):
     return int(lm_point.x * w), int(lm_point.y * h)
 
 
+# Hand skeleton connections (MediaPipe 21-landmark hand)
+_HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (5, 6), (6, 7), (7, 8),
+    (9, 10), (10, 11), (11, 12),
+    (13, 14), (14, 15), (15, 16),
+    (17, 18), (18, 19), (19, 20),
+    (0, 5), (5, 9), (9, 13), (13, 17), (0, 17),
+]
+_FINGERTIPS = {4, 8, 12, 16, 20}
+
+
+def draw_hand_overlay(frame, hand_data: HandData):
+    """Draw hand skeleton on a flipped display frame (detection ran on flipped frame)."""
+    h, w = frame.shape[:2]
+    if not hand_data.detected or not hand_data.landmarks:
+        return
+
+    # NDC from flipped-frame detection → pixel on flipped display frame
+    # ndc_x = 1 - l.x*2 where l.x is in [0,1] of the flipped frame
+    # pixel_x = (1 - ndc_x) / 2 * w = l.x * w  (no extra flip needed)
+    def ndc_to_px(ndc_x, ndc_y):
+        px = int((1.0 - ndc_x) / 2.0 * w)
+        py = int((1.0 - ndc_y) / 2.0 * h)
+        return px, py
+
+    pts = [ndc_to_px(nx, ny) for nx, ny in hand_data.landmarks]
+
+    color_open = (0, 255, 0)
+    color_closed = (0, 0, 255)
+
+    for a, b in _HAND_CONNECTIONS:
+        cv2.line(frame, pts[a], pts[b], (180, 180, 180), 2, cv2.LINE_AA)
+
+    for i, pt in enumerate(pts):
+        if i in _FINGERTIPS:
+            cv2.circle(frame, pt, 7, color_open, -1, cv2.LINE_AA)
+        else:
+            cv2.circle(frame, pt, 4, (255, 255, 0), -1, cv2.LINE_AA)
+
+    # Palm center marker
+    pcx = int((1.0 - hand_data.palm_ndc_x) / 2.0 * w)
+    pcy = int((1.0 - hand_data.palm_ndc_y) / 2.0 * h)
+    cv2.circle(frame, (pcx, pcy), 10, (0, 0, 255), 2, cv2.LINE_AA)
+
+    label = "OPEN PALM" if hand_data.is_open_palm else "HAND"
+    cv2.putText(frame, label, (10, h - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0) if hand_data.is_open_palm else (0, 200, 255), 2)
+
+
 def load_gesture_icons(target_h=100):
     icons = {}
     for name, filename in POSES:
@@ -136,24 +189,39 @@ def blend_icon(frame, icon_bgra, x, y):
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    # Build landmarker
-    BaseOptions          = mp.tasks.BaseOptions
-    PoseLandmarker       = mp.tasks.vision.PoseLandmarker
-    PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-    VisionRunningMode    = mp.tasks.vision.RunningMode
+    ap = argparse.ArgumentParser(description="Pose / Hand tracker debug tool")
+    ap.add_argument("--mode", choices=["pose", "hand", "both"], default="pose",
+                    help="pose = pose detection only (default), "
+                         "hand = hand tracking only, "
+                         "both = pose + hand overlaid")
+    args = ap.parse_args()
+    mode = args.mode
 
-    options = PoseLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=MODEL_PATH),
-        running_mode=VisionRunningMode.VIDEO,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
-    landmarker = PoseLandmarker.create_from_options(options)
+    print(f"=== Tracker Debug [{mode}] — Q/ESC to quit ===\n")
+
+    # Build pose landmarker (used for pose / both modes)
+    landmarker = None
+    ema = {p: 0.0 for p in POSE_NAMES}
+    ts_ms = 0
+    if mode in ("pose", "both"):
+        BaseOptions          = mp.tasks.BaseOptions
+        PoseLandmarker       = mp.tasks.vision.PoseLandmarker
+        PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
+        VisionRunningMode    = mp.tasks.vision.RunningMode
+
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=MODEL_PATH),
+            running_mode=VisionRunningMode.VIDEO,
+            min_pose_detection_confidence=0.5,
+            min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        landmarker = PoseLandmarker.create_from_options(options)
+
+    # Build hand tracker (used for hand / both modes)
+    hand_tracker = HandTracker() if mode in ("hand", "both") else None
 
     icons = load_gesture_icons(target_h=100)
-    ema   = {p: 0.0 for p in POSE_NAMES}
-    ts_ms = 0
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
@@ -175,7 +243,7 @@ def main():
             max_scroll = max(0, PANEL_HEADER_H + total_content_h - 720)
             scroll_y = max(0, min(scroll_y, max_scroll))
 
-    WIN_NAME = "Pose Estimator Test  [Q/ESC = quit]"
+    WIN_NAME = f"Tracker Debug [{mode}]  [Q/ESC = quit]"
     cv2.namedWindow(WIN_NAME)
     cv2.setMouseCallback(WIN_NAME, _on_mouse)
 
@@ -187,108 +255,98 @@ def main():
         h, w = frame.shape[:2]
         frame = cv2.flip(frame, 1)   # mirror so it feels natural
 
-        # ── run pose landmark detection ──────────────────────────────
-        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        ts_ms += 33
-        result = landmarker.detect_for_video(mp_img, ts_ms)
+        active_pose = None
 
-        active_pose = None   # highest-priority pose above EMA threshold
+        # ── pose detection ────────────────────────────────────────────
+        if landmarker is not None:
+            rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            ts_ms += 33
+            result = landmarker.detect_for_video(mp_img, ts_ms)
 
-        if result.pose_landmarks:
-            lm = result.pose_landmarks[0]
+            if result.pose_landmarks:
+                lm = result.pose_landmarks[0]
 
-            # ── update EMAs ─────────────────────────────────────────
-            for name in POSE_NAMES:
-                raw     = 1.0 if check_pose(name, lm) else 0.0
-                ema[name] = ema[name] * 0.7 + raw * 0.3
+                for name in POSE_NAMES:
+                    raw = 1.0 if check_pose(name, lm) else 0.0
+                    ema[name] = ema[name] * 0.7 + raw * 0.3
 
-            # First in priority order that crosses 0.5
-            for name in POSE_NAMES:
-                if ema[name] > 0.5:
-                    active_pose = name
-                    break
+                for name in POSE_NAMES:
+                    if ema[name] > 0.5:
+                        active_pose = name
+                        break
 
-            # ── draw skeleton ────────────────────────────────────────
-            bone_color  = (0, 220, 255) if active_pose else (180, 180, 180)
-            joint_color = (255, 255, 255)
+                bone_color = (0, 220, 255) if active_pose else (180, 180, 180)
+                for a, b in _CONNECTIONS:
+                    cv2.line(frame, lm_px(lm[a], w, h), lm_px(lm[b], w, h),
+                             bone_color, 2, cv2.LINE_AA)
 
-            for a, b in _CONNECTIONS:
-                ax, ay = lm_px(lm[a], w, h)
-                bx, by = lm_px(lm[b], w, h)
-                cv2.line(frame, (ax, ay), (bx, by), bone_color, 2, cv2.LINE_AA)
+                key_indices = {NOSE, LEFT_SHOULDER, RIGHT_SHOULDER,
+                               LEFT_ELBOW, RIGHT_ELBOW,
+                               LEFT_WRIST, RIGHT_WRIST,
+                               LEFT_HIP, RIGHT_HIP}
+                for i, pt in enumerate(lm):
+                    if i in key_indices:
+                        cv2.circle(frame, lm_px(pt, w, h), 5, (255, 255, 255), -1, cv2.LINE_AA)
 
-            key_indices = {NOSE, LEFT_SHOULDER, RIGHT_SHOULDER,
-                           LEFT_ELBOW, RIGHT_ELBOW,
-                           LEFT_WRIST, RIGHT_WRIST,
-                           LEFT_HIP, RIGHT_HIP}
-            for i, pt in enumerate(lm):
-                px, py = lm_px(pt, w, h)
-                if i in key_indices:
-                    cv2.circle(frame, (px, py), 5, joint_color, -1, cv2.LINE_AA)
+            else:
+                for name in POSE_NAMES:
+                    ema[name] *= 0.7
 
-        else:
-            # No detection — decay all EMAs
-            for name in POSE_NAMES:
-                ema[name] *= 0.7
+        # ── hand detection ────────────────────────────────────────────
+        if hand_tracker is not None:
+            hand_data = hand_tracker.process(frame)
+            draw_hand_overlay(frame, hand_data)
 
-        # ── right-side EMA panel ─────────────────────────────────────
-        panel_x = w - PANEL_W
-        cv2.rectangle(frame, (panel_x, 0), (w, h), (0, 0, 0), -1)
-        cv2.rectangle(frame, (panel_x, 0), (w, h), (60, 60, 60), 1)
+        # ── pose EMA panel (only when pose is active) ─────────────────
+        if landmarker is not None:
+            panel_x = w - PANEL_W
+            cv2.rectangle(frame, (panel_x, 0), (w, h), (0, 0, 0), -1)
+            cv2.rectangle(frame, (panel_x, 0), (w, h), (60, 60, 60), 1)
 
-        cv2.putText(frame, "POSE DETECTOR", (panel_x + 10, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 168, 78), 1, cv2.LINE_AA)
-        cv2.line(frame, (panel_x + 5, 36), (w - 5, 36), (80, 80, 80), 1)
+            cv2.putText(frame, "POSE DETECTOR", (panel_x + 10, 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 168, 78), 1, cv2.LINE_AA)
+            cv2.line(frame, (panel_x + 5, 36), (w - 5, 36), (80, 80, 80), 1)
 
-        icon_x = panel_x + 10
+            icon_x = panel_x + 10
 
-        for idx, name in enumerate(POSE_NAMES):
-            val      = ema[name]
-            is_active = (name == active_pose)
-            row_y    = PANEL_HEADER_H + idx * ROW_H - scroll_y
+            for idx, name in enumerate(POSE_NAMES):
+                val       = ema[name]
+                is_active = (name == active_pose)
+                row_y     = PANEL_HEADER_H + idx * ROW_H - scroll_y
 
-            # Skip rows fully outside the visible panel area
-            if row_y + ROW_H < PANEL_HEADER_H or row_y > h:
-                continue
+                if row_y + ROW_H < PANEL_HEADER_H or row_y > h:
+                    continue
 
-            # Gesture icon
-            if name in icons:
-                blend_icon(frame, icons[name], icon_x, row_y)
-            icon_w = icons[name].shape[1] if name in icons else 0
+                if name in icons:
+                    blend_icon(frame, icons[name], icon_x, row_y)
+                icon_w = icons[name].shape[1] if name in icons else 0
 
-            # Pose name label
-            label_color = (0, 255, 160) if is_active else (180, 180, 180)
-            display_name = name.replace("_", " ").title()
-            cv2.putText(frame, display_name,
-                        (icon_x + icon_w + 8, row_y + 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, label_color, 1, cv2.LINE_AA)
+                label_color = (0, 255, 160) if is_active else (180, 180, 180)
+                cv2.putText(frame, name.replace("_", " ").title(),
+                            (icon_x + icon_w + 8, row_y + 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, label_color, 1, cv2.LINE_AA)
 
-            # EMA bar
-            bar_w = int(val * BAR_MAX)
-            bar_y = row_y + 28
-            bar_color = (0, 220, 80) if val > 0.5 else (60, 160, 220)
-            cv2.rectangle(frame, (icon_x + icon_w + 8, bar_y),
-                          (icon_x + icon_w + 8 + BAR_MAX, bar_y + 10), (50, 50, 50), -1)
-            if bar_w > 0:
+                bar_w = int(val * BAR_MAX)
+                bar_y = row_y + 28
+                bar_color = (0, 220, 80) if val > 0.5 else (60, 160, 220)
                 cv2.rectangle(frame, (icon_x + icon_w + 8, bar_y),
-                              (icon_x + icon_w + 8 + bar_w, bar_y + 10), bar_color, -1)
-            # threshold marker at 0.5
-            tx = icon_x + icon_w + 8 + int(0.5 * BAR_MAX)
-            cv2.line(frame, (tx, bar_y - 2), (tx, bar_y + 12), (220, 220, 60), 1)
+                              (icon_x + icon_w + 8 + BAR_MAX, bar_y + 10), (50, 50, 50), -1)
+                if bar_w > 0:
+                    cv2.rectangle(frame, (icon_x + icon_w + 8, bar_y),
+                                  (icon_x + icon_w + 8 + bar_w, bar_y + 10), bar_color, -1)
+                tx = icon_x + icon_w + 8 + int(0.5 * BAR_MAX)
+                cv2.line(frame, (tx, bar_y - 2), (tx, bar_y + 12), (220, 220, 60), 1)
+                cv2.putText(frame, f"{val:.2f}",
+                            (icon_x + icon_w + 8 + BAR_MAX + 4, bar_y + 9),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (160, 160, 160), 1, cv2.LINE_AA)
 
-            cv2.putText(frame, f"{val:.2f}",
-                        (icon_x + icon_w + 8 + BAR_MAX + 4, bar_y + 9),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (160, 160, 160), 1, cv2.LINE_AA)
-
-        # ── active pose label (top of main viewport) ─────────────────
-        if active_pose:
-            label = active_pose.replace("_", " ").upper()
-            cv2.putText(frame, label, (20, 42),
-                        cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 220, 80), 2, cv2.LINE_AA)
-        else:
-            cv2.putText(frame, "no pose", (20, 42),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 100, 100), 1, cv2.LINE_AA)
+            if active_pose:
+                cv2.putText(frame, active_pose.replace("_", " ").upper(), (20, 42),
+                            cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 220, 80), 2, cv2.LINE_AA)
+            else:
+                cv2.putText(frame, "no pose", (20, 42),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 100, 100), 1, cv2.LINE_AA)
 
         cv2.imshow(WIN_NAME, frame)
         key = cv2.waitKey(1) & 0xFF
@@ -297,7 +355,10 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
-    landmarker.close()
+    if landmarker:
+        landmarker.close()
+    if hand_tracker:
+        hand_tracker.close()
 
 
 if __name__ == "__main__":

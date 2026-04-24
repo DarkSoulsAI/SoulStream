@@ -12,11 +12,13 @@ Usage:
 Press Q or ESC to quit.
 """
 
+import argparse
 import cv2
 import numpy as np
 import time
 
 from hand_tracker import HandTracker, HandData
+from pose_tracker import PoseTracker, PoseData
 
 # MediaPipe hand skeleton connections
 HAND_CONNECTIONS = [
@@ -127,11 +129,62 @@ def draw_hand_overlay(frame, hand_data, tracker):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 
-def main():
-    print("=== Hand Tracker Visual Test ===")
-    print("Press Q or ESC to quit.\n")
+# Pose skeleton connections (subset of 33 MediaPipe pose landmarks)
+_POSE_CONNECTIONS = [
+    (11, 12), (11, 23), (12, 24), (23, 24),   # torso
+    (11, 13), (13, 15),                         # left arm
+    (12, 14), (14, 16),                         # right arm
+]
+_POSE_KEY_JOINTS = {0, 11, 12, 13, 14, 15, 16, 23, 24}
 
-    tracker = HandTracker()
+
+def _ndc_to_px_flipped(ndc_x, ndc_y, w, h):
+    """Convert NDC coords (from unflipped detection) to pixel on a flipped display frame."""
+    px = int((1.0 + ndc_x) / 2.0 * w)
+    py = int((1.0 - ndc_y) / 2.0 * h)
+    return px, py
+
+
+def draw_pose_overlay(frame, pose_data: PoseData):
+    """Draw pose skeleton and active pose label on a horizontally-flipped display frame."""
+    if not pose_data.detected or not pose_data.landmarks:
+        cv2.putText(frame, "No pose detected", (frame.shape[1] // 2 - 100, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 200), 2)
+        return
+
+    h, w = frame.shape[:2]
+    lm = pose_data.landmarks  # list of 33 (ndc_x, ndc_y)
+    bone_color = (0, 220, 255) if pose_data.pose else (180, 180, 180)
+
+    for a, b in _POSE_CONNECTIONS:
+        if a < len(lm) and b < len(lm):
+            cv2.line(frame, _ndc_to_px_flipped(*lm[a], w, h),
+                     _ndc_to_px_flipped(*lm[b], w, h), bone_color, 2, cv2.LINE_AA)
+
+    for i in _POSE_KEY_JOINTS:
+        if i < len(lm):
+            cv2.circle(frame, _ndc_to_px_flipped(*lm[i], w, h), 5, (255, 255, 255), -1, cv2.LINE_AA)
+
+    if pose_data.pose:
+        label = pose_data.pose.replace("_", " ").upper()
+        cv2.putText(frame, label, (frame.shape[1] // 2 - 120, 80),
+                    cv2.FONT_HERSHEY_DUPLEX, 1.1, (0, 220, 80), 2, cv2.LINE_AA)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Hand / Pose tracker debug tool")
+    ap.add_argument("--mode", choices=["hand", "pose", "both"], default="hand",
+                    help="hand = hand tracking only (default), "
+                         "pose = pose detection only, "
+                         "both = hand + pose overlaid")
+    args = ap.parse_args()
+    mode = args.mode
+
+    print(f"=== Tracker Debug [{mode}] — Q/ESC to quit ===\n")
+
+    hand_tracker = HandTracker() if mode in ("hand", "both") else None
+    pose_tracker = PoseTracker() if mode in ("pose", "both") else None
+
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -149,15 +202,17 @@ def main():
         if not ok:
             continue
 
-        # Process un-mirrored frame (same as camera.py does)
-        hand_data = tracker.process(frame)
+        # Detect on the unflipped frame, then flip for natural display
+        hand_data = hand_tracker.process(frame) if hand_tracker else HandData()
+        pose_data = pose_tracker.process(frame) if pose_tracker else PoseData()
 
-        # Mirror frame for display so it feels natural
         frame = cv2.flip(frame, 1)
 
-        draw_hand_overlay(frame, hand_data, tracker)
+        if mode in ("hand", "both"):
+            draw_hand_overlay(frame, hand_data, hand_tracker)
+        if mode in ("pose", "both"):
+            draw_pose_overlay(frame, pose_data)
 
-        # FPS counter
         fps_count += 1
         elapsed = time.monotonic() - fps_time
         if elapsed >= 1.0:
@@ -168,13 +223,16 @@ def main():
         cv2.putText(frame, f"FPS: {fps_display:.0f}", (frame.shape[1] - 120, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow("Hand Tracker Test", frame)
+        cv2.imshow(f"Tracker Debug [{mode}]", frame)
 
         k = cv2.waitKey(1) & 0xFF
         if k == ord('q') or k == 27:
             break
 
-    tracker.close()
+    if hand_tracker:
+        hand_tracker.close()
+    if pose_tracker:
+        pose_tracker.close()
     cap.release()
     cv2.destroyAllWindows()
 

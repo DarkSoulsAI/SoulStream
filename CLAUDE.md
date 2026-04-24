@@ -31,6 +31,15 @@ shaders/
   shapes.vert / .frag    ← ShapesRenderer
 ```
 
+## MediaPipe Model Files
+
+`hand_landmarker.task` and `pose_landmarker_lite.task` are binary model files that must be downloaded separately — they are not in git. Place them in the project root.
+
+```
+curl -L -o hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+curl -L -o pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+```
+
 ## Camera Feature Flags
 
 `Camera` accepts `enable_hand` and `enable_pose` boolean kwargs. Both default to `True`. Each tracker is only instantiated and run when its flag is enabled, saving CPU. Runtime toggling via property setters (`camera.hand_enabled`, `camera.pose_enabled`) with lazy init.

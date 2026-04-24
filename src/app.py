@@ -30,6 +30,7 @@ SHADER_DIR = os.path.join(_ROOT_DIR, "shaders")
 IMAGE_DIR  = os.path.join(_ROOT_DIR, "image")
 AUDIO_DIR  = os.path.join(_ROOT_DIR, "audio")
 RESULT_DIR = os.path.join(_ROOT_DIR, "result")
+TIMELAPSE_DIR = os.path.join(RESULT_DIR, "timelapse")
 
 WIDTH, HEIGHT = 1280, 720
 
@@ -81,6 +82,11 @@ class SoulStreamApp(pyglet.window.Window):
         self.overlay = SoulOverlay()
         self.sound = SoundManager()
         self._prev_palm_open = False
+
+        # Timelapse auto-screenshot
+        self._timelapse_enabled = False
+        self._timelapse_timer = 0.0
+        self._timelapse_index = 0
 
         # Pose detection state
         self._gesture_overlay = GestureCornerOverlay(WIDTH, HEIGHT)
@@ -293,6 +299,21 @@ class SoulStreamApp(pyglet.window.Window):
         print(f"[Screenshot] Saved: {path}")
         self.overlay.trigger_banner("SCREENSHOT SAVED", (180, 200, 220))
 
+    def _toggle_timelapse(self):
+        self._timelapse_enabled = not self._timelapse_enabled
+        if self._timelapse_enabled:
+            self._timelapse_index = 0
+            self._timelapse_timer = 0.0
+            os.makedirs(TIMELAPSE_DIR, exist_ok=True)
+            self.overlay.trigger_banner("TIMELAPSE ON", (180, 220, 255))
+        else:
+            self.overlay.trigger_banner("TIMELAPSE OFF", (180, 180, 180))
+
+    def _timelapse_save(self):
+        path = os.path.join(TIMELAPSE_DIR, f"{self._timelapse_index}.png")
+        pyglet.image.get_buffer_manager().get_color_buffer().save(path)
+        self._timelapse_index += 1
+
     def _gui_quit(self):
         dur = self.sound.play_quit()
         self.sound.cleanup()
@@ -406,6 +427,8 @@ class SoulStreamApp(pyglet.window.Window):
             self._toggle_fullscreen()
         elif symbol == key.S:
             self._save_screenshot()
+        elif symbol == key.T:
+            self._toggle_timelapse()
         elif symbol == key.LEFT:
             if not self.use_camera:
                 self.image_source.prev_image()
@@ -567,26 +590,28 @@ class SoulStreamApp(pyglet.window.Window):
 
         mode = self._viz_mode
 
+        is_ember = self.mode_ctrl.is_ember
+
         if mode == VisualizationMode.POINTS:
-            self._renderers[VisualizationMode.POINTS].render(self.particles)
+            self._renderers[VisualizationMode.POINTS].render(self.particles, is_ember)
 
         elif mode == VisualizationMode.TRAILS:
-            self._renderers[VisualizationMode.TRAILS].render(self.particles)
+            self._renderers[VisualizationMode.TRAILS].render(self.particles, is_ember)
 
         elif mode == VisualizationMode.SKELETON:
             # Particles underneath, skeleton on top
-            self._renderers[VisualizationMode.POINTS].render(self.particles)
+            self._renderers[VisualizationMode.POINTS].render(self.particles, is_ember)
             self._renderers[VisualizationMode.SKELETON].render(
                 hand_data, pose_data, time.monotonic()
             )
 
         elif mode == VisualizationMode.FLOW:
-            self._renderers[VisualizationMode.POINTS].render(self.particles)
+            self._renderers[VisualizationMode.POINTS].render(self.particles, is_ember)
 
         elif mode == VisualizationMode.SHAPES:
-            self._renderers[VisualizationMode.POINTS].render(self.particles)
+            self._renderers[VisualizationMode.POINTS].render(self.particles, is_ember)
             self._renderers[VisualizationMode.SHAPES].update(
-                self.particles, self.mode_ctrl.is_ember, dt
+                self.particles, is_ember, dt
             )
             self._renderers[VisualizationMode.SHAPES].render()
 
@@ -726,6 +751,13 @@ class SoulStreamApp(pyglet.window.Window):
 
         # GUI menu — always last
         self.menu.draw()
+
+        # Timelapse: save after all drawing is done
+        if self._timelapse_enabled:
+            self._timelapse_timer += dt
+            if self._timelapse_timer >= 1.0:
+                self._timelapse_timer -= 1.0
+                self._timelapse_save()
 
     def on_close(self):
         self.sound.cleanup()

@@ -77,10 +77,11 @@ class PointsRenderer:
             [(self._vbo, "2f 3f 1f 1f", "in_pos", "in_color", "in_alpha", "in_size")],
         )
 
-    def render(self, particles):
+    def render(self, particles, is_ember: bool = False):
         n = particles.count
         if n == 0:
             return
+        self._prog['u_ember'] = 1 if is_ember else 0
         data = particles.pack_gpu()
         self._vbo.orphan()
         self._vbo.write(data.tobytes())
@@ -112,10 +113,11 @@ class TrailsRenderer:
             [(self._vbo, "2f 3f 1f 1f", "in_pos", "in_color", "in_alpha", "in_size")],
         )
 
-    def render(self, particles):
+    def render(self, particles, is_ember: bool = False):
         n = particles.count
         if n == 0:
             return
+        self._prog['u_ember'] = 1 if is_ember else 0
         data = particles.pack_gpu_trails()
         self._vbo.orphan()
         self._vbo.write(data.tobytes())

@@ -8,6 +8,16 @@ A Dark Souls-themed particle visualizer. 25,000 particles rise from edge-detecte
 
 ```
 pip install -r requirements.txt
+```
+
+Download the MediaPipe model files into the project root (not included in git):
+
+```
+curl -L -o hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+curl -L -o pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+```
+
+```
 python main.py
 ```
 
