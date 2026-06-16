@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-Hans" data-view="both">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="SoulStream is a bilingual Chinese-English documentation site for a Dark Souls-inspired particle visualizer with camera, gesture, pose, and living-glass modes."
+    />
+    <meta name="theme-color" content="#090b10" />
+    <meta property="og:title" content="SoulStream Documentation" />
+    <meta
+      property="og:description"
+      content="Complete bilingual docs for SoulStream: setup, controls, visualization modes, camera models, architecture, and GitHub Pages deployment."
+    />
+    <meta property="og:image" content="./assets/soulstream-hero.png" />
+    <title>SoulStream Docs | 灵魂流文档</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="SoulStream documentation home">
+        <span class="brand-mark"></span>
+        <span>SoulStream Docs</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#overview">Overview</a>
+        <a href="#setup">Setup</a>
+        <a href="#controls">Controls</a>
+        <a href="#modes">Modes</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#deploy">Deploy</a>
+      </nav>
+      <div class="language-switcher" aria-label="Language view">
+        <button type="button" class="lang-button is-active" data-view-button="both">中 / EN</button>
+        <button type="button" class="lang-button" data-view-button="zh">中文</button>
+        <button type="button" class="lang-button" data-view-button="en">EN</button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <picture>
+          <img
+            class="hero-image"
+            src="./assets/soulstream-hero.png"
+            alt="SoulStream particle field glowing over dark artwork"
+          />
+        </picture>
+        <div class="hero-shade"></div>
+        <div class="hero-content">
+          <p class="eyebrow">Bilingual Project Guide / 中英双语项目指南</p>
+          <h1 id="hero-title">SoulStream</h1>
+          <div class="hero-copy lang-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              一个黑暗幻想气质的实时粒子可视化作品：灵魂从图像边缘、摄像头亮度、手势与身体姿态中被召唤出来，在 Humanity 与 Ember 状态之间呼吸、上升、散开、燃烧。
+            </p>
+            <p lang="en" data-lang="en">
+              A real-time dark-fantasy particle visualizer where souls emerge from image edges, webcam brightness, hand gestures, and body pose, breathing between Humanity and Ember states.
+            </p>
+          </div>
+          <div class="hero-actions">
+            <a class="primary-action" href="#setup">Start / 开始</a>
+            <a class="secondary-action" href="https://github.com/DarkSoulsAI/SoulStream">GitHub</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="overview">
+        <div class="section-inner two-column">
+          <div>
+            <p class="section-kicker">01 / Overview</p>
+            <h2>What This Is / 项目是什么</h2>
+          </div>
+          <div class="lang-pair lead-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              SoulStream 是一个 Python + OpenGL 桌面视觉程序。它读取 <code>image/</code> 里的作品图像，通过 Canny 边缘、Sobel 梯度、亮度采样与实时物理更新生成最多约 25,000 个发光粒子。开启摄像头后，它还能根据运动、手掌张开、MediaPipe 姿态识别和人体分割切换视觉行为。
+            </p>
+            <p lang="en" data-lang="en">
+              SoulStream is a Python + OpenGL desktop visual instrument. It reads artwork from <code>image/</code>, then uses Canny edges, Sobel gradients, brightness sampling, and live physics to render up to roughly 25,000 glowing particles. With a webcam, it also reacts to motion, open palms, MediaPipe pose detection, and person segmentation.
+            </p>
+          </div>
+        </div>
+
+        <div class="section-inner feature-grid">
+          <article class="feature-card">
+            <h3>Particles / 粒子</h3>
+            <div class="lang-pair">
+              <p lang="zh-Hans" data-lang="zh">边缘与亮度决定灵魂生成位置；鼠标、手掌、姿态和流场会改变粒子速度、颜色和寿命。</p>
+              <p lang="en" data-lang="en">Edges and brightness drive soul spawning; mouse input, palms, pose, and flow fields reshape velocity, color, and lifetime.</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <h3>Camera / 摄像头</h3>
+            <div class="lang-pair">
+              <p lang="zh-Hans" data-lang="zh">摄像头模式支持运动触发 Ember、手部骨架、七种姿态效果，以及 Glass 模式的人体遮罩。</p>
+              <p lang="en" data-lang="en">Camera mode supports motion-triggered Ember, hand skeletons, seven pose effects, and body masks for Glass mode.</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <h3>Performance / 性能</h3>
+            <div class="lang-pair">
+              <p lang="zh-Hans" data-lang="zh">粒子 GPU 打包缓冲区预分配，渲染器按模式复用资源，避免在每帧创建 pyglet 图形对象。</p>
+              <p lang="en" data-lang="en">GPU particle buffers are preallocated, renderers reuse mode resources, and pyglet drawing objects are not recreated per frame.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="media-band" aria-labelledby="experience-title">
+        <div class="section-inner media-grid">
+          <figure>
+            <img src="./assets/soulstream-menu.png" alt="SoulStream in-app control menu" loading="lazy" />
+            <figcaption>Interactive menu / 交互菜单</figcaption>
+          </figure>
+          <figure>
+            <img src="./assets/soulstream-hand-track.png" alt="SoulStream hand tracking debug view" loading="lazy" />
+            <figcaption>Hand tracking / 手部追踪</figcaption>
+          </figure>
+          <figure>
+            <img src="./assets/soulstream-ember.png" alt="SoulStream Ember visualization" loading="lazy" />
+            <figcaption>Ember mode / 余烬模式</figcaption>
+          </figure>
+        </div>
+        <div class="section-inner" id="experience-title">
+          <div class="lang-pair caption-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              这个文档站不是营销页，而是可运行项目的使用手册：面向玩家、展示者和维护者。
+            </p>
+            <p lang="en" data-lang="en">
+              This documentation site is not a marketing shell; it is the operating manual for players, presenters, and maintainers.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="setup">
+        <div class="section-inner">
+          <p class="section-kicker">02 / Setup</p>
+          <h2>Install And Run / 安装与运行</h2>
+          <div class="lang-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              SoulStream 需要 Python 3.10+、OpenGL 3.3 可用的显卡，以及项目根目录中的 MediaPipe 模型文件。模型文件是二进制资源，不随 git 提交。
+            </p>
+            <p lang="en" data-lang="en">
+              SoulStream requires Python 3.10+, an OpenGL 3.3 capable GPU, and MediaPipe model files in the project root. The models are binary assets and are not committed to git.
+            </p>
+          </div>
+          <div class="code-panels">
+            <div class="code-panel">
+              <h3>1. Install dependencies / 安装依赖</h3>
+              <pre><code>pip install -r requirements.txt</code></pre>
+            </div>
+            <div class="code-panel">
+              <h3>2. Download models / 下载模型</h3>
+              <pre><code>curl -L -o hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+curl -L -o pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+curl -L -o selfie_segmenter_landscape.tflite https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite</code></pre>
+            </div>
+            <div class="code-panel">
+              <h3>3. Start / 启动</h3>
+              <pre><code>python main.py</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="controls">
+        <div class="section-inner">
+          <p class="section-kicker">03 / Controls</p>
+          <h2>Keyboard And Mouse / 键盘与鼠标</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Input</th>
+                  <th>中文</th>
+                  <th>English</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><kbd>Enter</kbd></td><td>从加载界面进入开场。</td><td>Leave the loading screen and start the intro.</td></tr>
+                <tr><td><kbd>Space</kbd></td><td>循环 Auto / Humanity / Ember。</td><td>Cycle Auto, Humanity, and Ember modes.</td></tr>
+                <tr><td><kbd>Left</kbd> / <kbd>Right</kbd></td><td>切换 <code>image/</code> 中的源图像。</td><td>Switch source artwork from <code>image/</code>.</td></tr>
+                <tr><td><kbd>C</kbd></td><td>开启或关闭摄像头输入。</td><td>Toggle webcam input.</td></tr>
+                <tr><td><kbd>H</kbd></td><td>开启或关闭手部追踪。</td><td>Toggle hand tracking.</td></tr>
+                <tr><td><kbd>P</kbd></td><td>开启或关闭姿态检测。</td><td>Toggle pose detection.</td></tr>
+                <tr><td><kbd>V</kbd></td><td>循环六种视觉模式。</td><td>Cycle the six visualization modes.</td></tr>
+                <tr><td><kbd>1</kbd>-<kbd>6</kbd></td><td>直接跳转到指定视觉模式。</td><td>Jump directly to a visualization mode.</td></tr>
+                <tr><td><kbd>A</kbd></td><td>循环五种艺术预设。</td><td>Cycle the five art presets.</td></tr>
+                <tr><td><kbd>L</kbd></td><td>为 Glass 模式锁定干净背景板。</td><td>Capture a clean plate for Glass mode.</td></tr>
+                <tr><td><kbd>M</kbd></td><td>静音或恢复环境音。</td><td>Mute or restore ambience.</td></tr>
+                <tr><td><kbd>R</kbd></td><td>将所有灵魂冲击散开。</td><td>Scatter all souls with a shockwave.</td></tr>
+                <tr><td><kbd>B</kbd></td><td>在屏幕中央生成 150 个灵魂。</td><td>Burst 150 souls from screen center.</td></tr>
+                <tr><td><kbd>G</kbd></td><td>翻转重力，让灵魂下坠。</td><td>Flip gravity so souls fall.</td></tr>
+                <tr><td><kbd>D</kbd></td><td>显示或隐藏调试层。</td><td>Toggle the debug overlay.</td></tr>
+                <tr><td><kbd>F1</kbd></td><td>显示浮动帮助。</td><td>Show floating help.</td></tr>
+                <tr><td><kbd>S</kbd></td><td>保存截图到 <code>result/</code>。</td><td>Save a screenshot to <code>result/</code>.</td></tr>
+                <tr><td><kbd>T</kbd></td><td>切换延时摄影输出。</td><td>Toggle timelapse output.</td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>打开或关闭 GUI 菜单。</td><td>Open or close the GUI menu.</td></tr>
+                <tr><td><kbd>F11</kbd></td><td>切换全屏。</td><td>Toggle fullscreen.</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>关闭菜单或退出。</td><td>Close the menu or quit.</td></tr>
+                <tr><td>Mouse move</td><td>图像模式下推开光标附近的灵魂。</td><td>In image mode, repel nearby souls from the cursor.</td></tr>
+                <tr><td>Left click</td><td>在光标位置生成粒子爆发。</td><td>Create a particle burst at the cursor.</td></tr>
+                <tr><td>Right hold</td><td>将灵魂吸向光标。</td><td>Attract souls toward the cursor.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="modes">
+        <div class="section-inner">
+          <p class="section-kicker">04 / Visualization Modes</p>
+          <h2>Six Renderers / 六种视觉模式</h2>
+          <div class="mode-list">
+            <article>
+              <span class="mode-index">1</span>
+              <h3>Points / 点云</h3>
+              <p lang="zh-Hans" data-lang="zh">原始圆形发光粒子云，适合展示图像边缘与灵魂上升的基础视觉。</p>
+              <p lang="en" data-lang="en">The original circular glowing point cloud, best for image-edge souls and the core rising motion.</p>
+            </article>
+            <article>
+              <span class="mode-index">2</span>
+              <h3>Trails / 拖尾</h3>
+              <p lang="zh-Hans" data-lang="zh">每个粒子从上一帧位置到当前帧位置留下衰减线段，形成流动痕迹。</p>
+              <p lang="en" data-lang="en">Each particle draws a fading segment from previous to current position, creating flowing trails.</p>
+            </article>
+            <article>
+              <span class="mode-index">3</span>
+              <h3>Skeleton / 骨架</h3>
+              <p lang="zh-Hans" data-lang="zh">在粒子场上叠加 MediaPipe 手部与身体骨架，并使用当前艺术预设着色。</p>
+              <p lang="en" data-lang="en">Overlays MediaPipe hand and body skeletons above the particle field using the active art preset.</p>
+            </article>
+            <article>
+              <span class="mode-index">4</span>
+              <h3>Flow / 流场</h3>
+              <p lang="zh-Hans" data-lang="zh">CPU 计算二维 curl-noise 场，改变粒子速度，让灵魂路径变成丝带状流动。</p>
+              <p lang="en" data-lang="en">Computes a CPU curl-noise field that bends particle velocity into ribbon-like movement.</p>
+            </article>
+            <article>
+              <span class="mode-index">5</span>
+              <h3>Shapes / 形符</h3>
+              <p lang="zh-Hans" data-lang="zh">从存活粒子中采样，绘制旋转三角符号，形成仪式感的几何层。</p>
+              <p lang="en" data-lang="en">Samples live particles to draw rotating triangle sigils, adding a ritual geometric layer.</p>
+            </article>
+            <article>
+              <span class="mode-index">6</span>
+              <h3>Glass / 活体玻璃</h3>
+              <p lang="zh-Hans" data-lang="zh">用摄像头画面、锁定背景板和人体分割遮罩生成折射隐身效果。先按 <kbd>C</kbd> 开摄像头，离开画面，按 <kbd>L</kbd> 锁定背景，再回到画面中。</p>
+              <p lang="en" data-lang="en">Uses the live camera, a locked clean plate, and person segmentation to create refractive invisibility. Press <kbd>C</kbd>, step out, press <kbd>L</kbd>, then step back in.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="camera">
+        <div class="section-inner two-column">
+          <div>
+            <p class="section-kicker">05 / Camera And Models</p>
+            <h2>MediaPipe Features / 摄像头特性</h2>
+          </div>
+          <div class="lang-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              <code>Camera</code> 支持 <code>enable_hand</code>、<code>enable_pose</code>、<code>enable_body</code> 三个特性开关。手部和姿态默认开启，人体分割默认关闭，并在 Glass 模式需要时懒加载。运行时可通过菜单或快捷键切换，以便在性能与表现之间取舍。
+            </p>
+            <p lang="en" data-lang="en">
+              <code>Camera</code> supports <code>enable_hand</code>, <code>enable_pose</code>, and <code>enable_body</code> feature flags. Hand and pose start enabled; body segmentation starts disabled and is lazily enabled for Glass mode. Runtime toggles let you trade visual capability for CPU headroom.
+            </p>
+          </div>
+        </div>
+        <div class="section-inner feature-grid">
+          <article class="feature-card">
+            <h3>Hand Landmarker</h3>
+            <p lang="zh-Hans" data-lang="zh">张开的手掌会点燃附近粒子，并在 Glass 模式中触发折射涟漪。</p>
+            <p lang="en" data-lang="en">An open palm kindles nearby particles and triggers refraction ripples in Glass mode.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Pose Landmarker</h3>
+            <p lang="zh-Hans" data-lang="zh">识别 Praise the Sun、Point Down、Bow 等姿态并播放视觉与音频反馈。</p>
+            <p lang="en" data-lang="en">Recognizes poses such as Praise the Sun, Point Down, and Bow, then plays visual and audio reactions.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Selfie Segmenter</h3>
+            <p lang="zh-Hans" data-lang="zh">为 Glass 模式提供人体遮罩，让背景板折射只发生在身体轮廓附近。</p>
+            <p lang="en" data-lang="en">Provides the body mask for Glass mode so clean-plate refraction follows the person silhouette.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section alt" id="architecture">
+        <div class="section-inner">
+          <p class="section-kicker">06 / Architecture</p>
+          <h2>Project Structure / 项目结构</h2>
+          <div class="architecture-grid">
+            <div class="code-panel">
+              <pre><code>main.py
+src/
+  app.py
+  overlays.py
+  visualization.py
+  gui.py
+  particles.py
+  camera.py
+  hand_tracker.py
+  pose_tracker.py
+  body_segmenter.py
+  image_source.py
+shaders/
+  particle.vert / particle.frag
+  skeleton.vert / skeleton.frag
+  shapes.vert / shapes.frag
+image/
+audio/
+result/</code></pre>
+            </div>
+            <div class="lang-pair">
+              <p lang="zh-Hans" data-lang="zh">
+                <code>main.py</code> 只负责把 <code>src/</code> 加入 <code>sys.path</code> 并启动应用。<code>SoulStreamApp</code> 在 <code>src/app.py</code> 中管理窗口、状态机、输入和每帧渲染。视觉模式被拆成渲染器类，GUI 和 overlay 只创建一次并在窗口变化时重定位。粒子系统负责生成、物理、GPU 打包和交互冲击。
+              </p>
+              <p lang="en" data-lang="en">
+                <code>main.py</code> only adds <code>src/</code> to <code>sys.path</code> and starts the app. <code>SoulStreamApp</code> in <code>src/app.py</code> owns the window, state machine, input, and draw loop. Visualization modes are separate renderer classes, while GUI and overlays are created once and repositioned on resize. The particle system handles spawning, physics, GPU packing, and interaction impulses.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="troubleshooting">
+        <div class="section-inner">
+          <p class="section-kicker">07 / Troubleshooting</p>
+          <h2>Common Issues / 常见问题</h2>
+          <div class="faq-list">
+            <article>
+              <h3>Missing MediaPipe models / 缺少模型文件</h3>
+              <p lang="zh-Hans" data-lang="zh">如果手部、姿态或 Glass 模式无法启动，请确认三个模型文件位于项目根目录，而不是 <code>src/</code> 或 <code>docs/</code>。</p>
+              <p lang="en" data-lang="en">If hand, pose, or Glass mode fails to start, confirm the three model files live in the project root, not under <code>src/</code> or <code>docs/</code>.</p>
+            </article>
+            <article>
+              <h3>OpenGL errors / OpenGL 错误</h3>
+              <p lang="zh-Hans" data-lang="zh">项目要求 OpenGL 3.3。请更新显卡驱动，并尽量使用独立显卡或支持现代 OpenGL 的集显。</p>
+              <p lang="en" data-lang="en">The app requires OpenGL 3.3. Update graphics drivers and prefer a discrete GPU or a modern integrated GPU with OpenGL support.</p>
+            </article>
+            <article>
+              <h3>Glass looks unchanged / Glass 没有效果</h3>
+              <p lang="zh-Hans" data-lang="zh">先开启摄像头，进入 Glass，离开画面并按 <kbd>L</kbd> 锁定干净背景板。没有背景板或人体遮罩时，Glass 会回退到普通摄像头画面。</p>
+              <p lang="en" data-lang="en">Enable camera, switch to Glass, step out, and press <kbd>L</kbd> to lock a clean plate. Without a clean plate or body mask, Glass falls back to the raw camera view.</p>
+            </article>
+            <article>
+              <h3>Slow camera mode / 摄像头模式卡顿</h3>
+              <p lang="zh-Hans" data-lang="zh">关闭暂时不用的 Hand、Pose 或 Glass 分割功能。调试层也会增加绘制工作量，演示时可关闭。</p>
+              <p lang="en" data-lang="en">Disable unused Hand, Pose, or Glass segmentation features. The debug overlay also adds drawing work and can be turned off during demos.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="deploy">
+        <div class="section-inner">
+          <p class="section-kicker">08 / GitHub Pages</p>
+          <h2>Deploy This Documentation / 发布此文档站</h2>
+          <div class="lang-pair">
+            <p lang="zh-Hans" data-lang="zh">
+              本仓库已准备好 GitHub Actions Pages 工作流。推送到 <code>main</code> 后，GitHub 会把 <code>docs/</code> 目录作为静态站点发布。首次使用时，请在 GitHub 仓库中进入 Settings → Pages，把 Source 选择为 “GitHub Actions”。
+            </p>
+            <p lang="en" data-lang="en">
+              This repository includes a GitHub Actions Pages workflow. After pushing to <code>main</code>, GitHub publishes the <code>docs/</code> directory as a static site. For the first run, open Settings → Pages in the repository and set Source to “GitHub Actions”.
+            </p>
+          </div>
+          <div class="deploy-steps">
+            <article>
+              <span>1</span>
+              <p lang="zh-Hans" data-lang="zh">提交 <code>docs/</code> 与 <code>.github/workflows/pages.yml</code>。</p>
+              <p lang="en" data-lang="en">Commit <code>docs/</code> and <code>.github/workflows/pages.yml</code>.</p>
+            </article>
+            <article>
+              <span>2</span>
+              <p lang="zh-Hans" data-lang="zh">推送到 <code>main</code> 分支。</p>
+              <p lang="en" data-lang="en">Push to the <code>main</code> branch.</p>
+            </article>
+            <article>
+              <span>3</span>
+              <p lang="zh-Hans" data-lang="zh">在 Actions 中等待 “Deploy docs to GitHub Pages” 完成。</p>
+              <p lang="en" data-lang="en">Wait for “Deploy docs to GitHub Pages” to complete in Actions.</p>
+            </article>
+            <article>
+              <span>4</span>
+              <p lang="zh-Hans" data-lang="zh">访问 <a href="https://darksoulsai.github.io/SoulStream/">https://darksoulsai.github.io/SoulStream/</a>。</p>
+              <p lang="en" data-lang="en">Visit <a href="https://darksoulsai.github.io/SoulStream/">https://darksoulsai.github.io/SoulStream/</a>.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-inner footer-grid">
+        <div>
+          <strong>SoulStream</strong>
+          <p>Dark fantasy particles, computer vision, and live ritual controls.</p>
+        </div>
+        <div class="lang-pair">
+          <p lang="zh-Hans" data-lang="zh">文档站位于 <code>docs/</code>，可直接由 GitHub Pages 发布。</p>
+          <p lang="en" data-lang="en">The documentation site lives in <code>docs/</code> and is ready for GitHub Pages.</p>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
