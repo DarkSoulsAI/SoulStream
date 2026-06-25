@@ -32,6 +32,7 @@ Requires Python 3.10+ and an OpenGL 3.3 capable GPU.
 | `C` | Toggle webcam input |
 | `H` | Hand tracker toggle (only active with webcam) |
 | `P` | Pose detector toggle (only active with webcam) |
+| `B` | Toggle Bonfire Palm interaction HUD/effect |
 | `V` | Cycle visualization mode |
 | `1` – `5` | Jump to visualization mode directly |
 | `D` | Debug overlay |
@@ -47,7 +48,7 @@ Press `TAB` to open a Dark Souls-themed interactive overlay with clickable butto
 
 ![GUI Menu](result_screenshot/image-20260213223253389.png)
 
-Panels: **Source** (camera/image switching), **Camera Features** (hand tracker / pose detector toggles), **Mode** (Auto/Humanity/Ember), **Visualization** (5 modes), **Audio** (volume slider), **Tools** (debug/help toggles), and **Quit**. Hover any button for a tooltip description.
+Panels: **Source** (camera/image switching), **Camera Features** (hand tracker / pose detector toggles), **Interaction** (Bonfire Palm), **Mode** (Auto/Humanity/Ember), **Visualization** (5 modes), **Audio** (volume slider), **Tools** (debug/help toggles), and **Quit**. Hover any button for a tooltip description.
 
 ## Visualization Modes
 
@@ -67,6 +68,7 @@ When the webcam is active (`C`), you can independently toggle:
 
 - **Hand Tracker** (`H` or menu) — open-palm detection kindles nearby particles; toggling off saves CPU.
 - **Pose Detector** (`P` or menu) — 7 poses trigger visual effects (Praise the Sun, YOU DIED, etc.); toggling off saves CPU.
+- **Bonfire Palm** (`B` or menu) — turns an open palm into a product HUD with palm reticle, kindle radius, charge, and Palm -> Sun mapping.
 
 Both start enabled. Turn off whichever you don't need for a lighter experience.
 

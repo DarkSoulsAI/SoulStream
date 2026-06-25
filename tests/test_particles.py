@@ -174,12 +174,24 @@ class TestSpawnPalmSparks:
         ps.spawn_palm_sparks(0.0, 0.0)
         assert ps.count == 15
 
+    def test_custom_count(self):
+        ps = ParticleSystem()
+        ps.spawn_palm_sparks(0.0, 0.0, count=32)
+        assert ps.count == 32
+
     def test_positions_near_palm(self):
         ps = ParticleSystem()
         ps.spawn_palm_sparks(0.5, 0.3)
         n = ps.count
         assert np.all(np.abs(ps.pos_x[:n] - 0.5) <= 0.04)
         assert np.all(np.abs(ps.pos_y[:n] - 0.3) <= 0.04)
+
+    def test_custom_spread(self):
+        ps = ParticleSystem()
+        ps.spawn_palm_sparks(0.5, 0.3, spread=0.01)
+        n = ps.count
+        assert np.all(np.abs(ps.pos_x[:n] - 0.5) <= 0.011)
+        assert np.all(np.abs(ps.pos_y[:n] - 0.3) <= 0.011)
 
     def test_velocity_upward(self):
         ps = ParticleSystem()
