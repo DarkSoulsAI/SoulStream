@@ -243,6 +243,7 @@ class GameMenu:
     --------
     Source         : [Camera ON/OFF]  [< Prev]  [Next >]
     Camera Features: [Hand Track]  [Pose Detect]
+    Interaction    : [Bonfire Palm]
     Mode           : [Auto]  [Humanity]  [Ember]          (radio)
     Visualization  : [Points] [Trails] [Skeleton] [Flow] [Shapes]  (radio)
     Audio          : Volume slider
@@ -259,7 +260,7 @@ class GameMenu:
             Required keys:
                 toggle_camera, prev_image, next_image,
                 set_mode_auto, set_mode_humanity, set_mode_ember,
-                toggle_hand, toggle_pose,
+                toggle_hand, toggle_pose, toggle_bonfire_palm,
                 set_viz,
                 set_volume, toggle_debug, toggle_help, quit
         """
@@ -333,6 +334,18 @@ class GameMenu:
             toggle=True,
         )
         y -= cam_h + gap
+
+        interact_h = row_h + panel_pad
+        self._interaction_panel = GuiPanel(px, y - interact_h, panel_w, interact_h, "Interaction")
+        btn_y = y - interact_h + 10
+        self._btn_bonfire = GuiButton(
+            px + 10, btn_y, panel_w - 20, row_h, "Bonfire Palm",
+            tooltip="Open palm kindles particles and shows the Palm -> Sun product HUD",
+            callback=callbacks["toggle_bonfire_palm"],
+            toggle=True,
+        )
+        self._btn_bonfire.active = True
+        y -= interact_h + gap
 
         # ── Mode panel ────────────────────────────────────────
         mode_h = row_h + panel_pad
@@ -434,13 +447,14 @@ class GameMenu:
         self._buttons = [
             self._btn_camera, self._btn_prev, self._btn_next,
             self._btn_hand, self._btn_pose,
+            self._btn_bonfire,
             self._btn_auto, self._btn_humanity, self._btn_ember,
             *self._viz_buttons,
             self._btn_debug, self._btn_help,
             self._btn_quit,
         ]
         self._panels = [
-            self._source_panel, self._cam_panel, self._mode_panel,
+            self._source_panel, self._cam_panel, self._interaction_panel, self._mode_panel,
             self._viz_panel, self._audio_panel, self._tools_panel,
         ]
 
@@ -448,7 +462,8 @@ class GameMenu:
 
     def sync_state(self, *, use_camera=False, mode=0,
                    debug=False, help_visible=False, volume=0.25,
-                   hand_enabled=True, pose_enabled=True, viz_mode=0):
+                   hand_enabled=True, pose_enabled=True,
+                   bonfire_palm_enabled=True, viz_mode=0):
         """Sync button active states with app state."""
         self._btn_camera.active = use_camera
         for btn in self._mode_buttons:
@@ -458,6 +473,7 @@ class GameMenu:
         self._slider_vol.value = volume
         self._btn_hand.active = hand_enabled
         self._btn_pose.active = pose_enabled
+        self._btn_bonfire.active = bonfire_palm_enabled
         for btn in self._viz_buttons:
             btn.active = (btn.group_value == viz_mode)
 

@@ -9,8 +9,9 @@ import moderngl
 
 from image_source import ImageSource
 import particles as _particles_mod
-from particles import ParticleSystem, MAX_PARTICLES, SPAWN_PER_FRAME
+from particles import ParticleSystem, SPAWN_PER_FRAME
 from gui import GameMenu
+from bonfire_palm import BonfirePalmController, BonfirePalmOverlay
 from overlays import (
     SoundManager, ModeController, DebugOverlay, SoulOverlay,
     GestureCornerOverlay, YouDiedOverlay,
@@ -26,9 +27,7 @@ from visualization import (
 
 _SRC_DIR   = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR  = os.path.dirname(_SRC_DIR)
-SHADER_DIR = os.path.join(_ROOT_DIR, "shaders")
 IMAGE_DIR  = os.path.join(_ROOT_DIR, "image")
-AUDIO_DIR  = os.path.join(_ROOT_DIR, "audio")
 RESULT_DIR = os.path.join(_ROOT_DIR, "result")
 TIMELAPSE_DIR = os.path.join(RESULT_DIR, "timelapse")
 
@@ -45,6 +44,7 @@ _INTRO_KEYS = [
     ("SPACE",  "Cycle Modes",   (255, 140, 50)),
     ("\u2190 \u2192",   "Change Image",  (80, 220, 255)),
     ("C",      "Toggle Camera", (80, 255, 120)),
+    ("B",      "Bonfire Palm",  (255, 180, 70)),
     ("F1",     "Help",          (255, 100, 220)),
     ("TAB",    "Menu",          (200, 168, 78)),
     ("ESC",    "Quit",          (255, 80, 80)),
@@ -81,7 +81,8 @@ class SoulStreamApp(pyglet.window.Window):
         self.debug = DebugOverlay(self.ctx)
         self.overlay = SoulOverlay()
         self.sound = SoundManager()
-        self._prev_palm_open = False
+        self.bonfire_palm = BonfirePalmController()
+        self._bonfire_overlay = BonfirePalmOverlay(WIDTH, HEIGHT)
 
         # Timelapse auto-screenshot
         self._timelapse_enabled = False
@@ -205,6 +206,47 @@ class SoulStreamApp(pyglet.window.Window):
 
     # ── callbacks dict ──────────────────────────────────────
 
+    # ── state sync and source helpers ───────────────────────────────────────
+
+    def _sync_menu_state(self):
+        self.menu.sync_state(
+            use_camera=self.use_camera,
+            mode=self.mode_ctrl.mode,
+            debug=self.debug.enabled,
+            help_visible=self.overlay._help_visible,
+            volume=(self.sound._ambience_player.volume
+                    if self.sound._ambience_player else 0.25),
+            hand_enabled=self._hand_enabled,
+            pose_enabled=self._pose_enabled,
+            bonfire_palm_enabled=self.bonfire_palm.enabled,
+            viz_mode=int(self._viz_mode),
+        )
+
+    def _ensure_camera(self):
+        if self.camera is not None:
+            return
+        from camera import Camera
+        self.camera = Camera(
+            enable_hand=self._hand_enabled,
+            enable_pose=self._pose_enabled,
+        )
+        self.overlay.trigger_banner("KINDLING CAMERA...", (255, 160, 40))
+
+    def _toggle_camera_source(self):
+        if self.use_camera:
+            self.use_camera = False
+            self._source_transition = 1.5
+            self.bonfire_palm.reset()
+            return
+
+        self._ensure_camera()
+        self.use_camera = True
+        self._source_transition = 1.5
+        self.sound.play(AUDIO_CAMERA_ON)
+
+    def _update_source_transition(self, dt):
+        self._update_source_transition(dt)
+
     def _build_callbacks(self):
         return {
             "toggle_camera":     self._gui_toggle_camera,
@@ -215,6 +257,7 @@ class SoulStreamApp(pyglet.window.Window):
             "set_mode_ember":    lambda: self._gui_set_mode(2),
             "toggle_hand":       self._gui_toggle_hand,
             "toggle_pose":       self._gui_toggle_pose,
+            "toggle_bonfire_palm": self._gui_toggle_bonfire_palm,
             "set_viz":           self._gui_set_viz,
             "set_volume":        self._gui_set_volume,
             "toggle_debug":      self._gui_toggle_debug,
@@ -225,20 +268,7 @@ class SoulStreamApp(pyglet.window.Window):
     # ── GUI menu callbacks ──────────────────────────────────
 
     def _gui_toggle_camera(self):
-        if self.use_camera:
-            self.use_camera = False
-            self._source_transition = 1.5
-        else:
-            if self.camera is None:
-                from camera import Camera
-                self.camera = Camera(
-                    enable_hand=self._hand_enabled,
-                    enable_pose=self._pose_enabled,
-                )
-                self.overlay.trigger_banner("KINDLING CAMERA...", (255, 160, 40))
-            self.use_camera = True
-            self._source_transition = 1.5
-            self.sound.play(AUDIO_CAMERA_ON)
+        self._toggle_camera_source()
 
     def _gui_prev_image(self):
         if not self.use_camera:
@@ -279,6 +309,13 @@ class SoulStreamApp(pyglet.window.Window):
             self.camera.pose_enabled = self._pose_enabled
         label = "POSE DETECT ON" if self._pose_enabled else "POSE DETECT OFF"
         self.overlay.trigger_banner(label, (80, 220, 255))
+
+    def _gui_toggle_bonfire_palm(self):
+        self.bonfire_palm.enabled = not self.bonfire_palm.enabled
+        if not self.bonfire_palm.enabled:
+            self.bonfire_palm.reset()
+        label = "BONFIRE PALM ON" if self.bonfire_palm.enabled else "BONFIRE PALM OFF"
+        self.overlay.trigger_banner(label, (255, 160, 40))
 
     def _gui_set_viz(self, mode_int: int):
         self._viz_mode = VisualizationMode(mode_int)
@@ -364,17 +401,7 @@ class SoulStreamApp(pyglet.window.Window):
             return
 
         if symbol == key.TAB:
-            self.menu.sync_state(
-                use_camera=self.use_camera,
-                mode=self.mode_ctrl.mode,
-                debug=self.debug.enabled,
-                help_visible=self.overlay._help_visible,
-                volume=(self.sound._ambience_player.volume
-                        if self.sound._ambience_player else 0.25),
-                hand_enabled=self._hand_enabled,
-                pose_enabled=self._pose_enabled,
-                viz_mode=int(self._viz_mode),
-            )
+            self._sync_menu_state()
             self.menu.toggle()
             return
         if symbol == key.ESCAPE:
@@ -390,24 +417,13 @@ class SoulStreamApp(pyglet.window.Window):
             self.mode_ctrl.cycle()
             self.sound.play(AUDIO_MODE_CYCLE)
         elif symbol == key.C:
-            if self.use_camera:
-                self.use_camera = False
-                self._source_transition = 1.5
-            else:
-                if self.camera is None:
-                    from camera import Camera
-                    self.camera = Camera(
-                        enable_hand=self._hand_enabled,
-                        enable_pose=self._pose_enabled,
-                    )
-                    self.overlay.trigger_banner("KINDLING CAMERA...", (255, 160, 40))
-                self.use_camera = True
-                self._source_transition = 1.5
-                self.sound.play(AUDIO_CAMERA_ON)
+            self._toggle_camera_source()
         elif symbol == key.H:
             self._gui_toggle_hand()
         elif symbol == key.P:
             self._gui_toggle_pose()
+        elif symbol == key.B:
+            self._gui_toggle_bonfire_palm()
         elif symbol == key.V:
             self._gui_set_viz((int(self._viz_mode) + 1) % 5)
         elif symbol == key._1:
@@ -502,19 +518,10 @@ class SoulStreamApp(pyglet.window.Window):
 
         self._you_died_overlay.resize(width, height)
         self._gesture_overlay.resize(width, height)
+        self._bonfire_overlay.resize(width, height)
 
         self.menu = GameMenu(width, height, callbacks=self._build_callbacks())
-        self.menu.sync_state(
-            use_camera=self.use_camera,
-            mode=self.mode_ctrl.mode,
-            debug=self.debug.enabled,
-            help_visible=self.overlay._help_visible,
-            volume=(self.sound._ambience_player.volume
-                    if self.sound._ambience_player else 0.25),
-            hand_enabled=self._hand_enabled,
-            pose_enabled=self._pose_enabled,
-            viz_mode=int(self._viz_mode),
-        )
+        self._sync_menu_state()
 
     def _toggle_fullscreen(self):
         self._is_fullscreen = not self._is_fullscreen
@@ -617,6 +624,53 @@ class SoulStreamApp(pyglet.window.Window):
 
     # ── Main draw loop ──────────────────────────────────────
 
+    def _spawn_from_image_source(self, now):
+        self.mode_ctrl.update_image(now)
+        self.particles.spawn(self.image_source, self.mode_ctrl.is_ember)
+
+    def _update_pose_interaction(self, dt):
+        pose_data = self.camera.get_pose_data()
+        self._pose_cooldown = max(0.0, self._pose_cooldown - dt)
+        pose_name = pose_data.pose if pose_data.detected else None
+        if pose_name and pose_name != self._prev_pose and self._pose_cooldown <= 0:
+            self._trigger_pose_effect(pose_name, pose_data)
+            self._pose_cooldown = 5.0
+        self._prev_pose = pose_name
+        return pose_data
+
+    def _spawn_from_camera_source(self, now, dt):
+        brightness, motion, avg_motion = self.camera.get_data()
+
+        hand_data = self.camera.get_hand_data() if self._hand_enabled else None
+        open_palm = hand_data.is_open_palm if (hand_data and hand_data.detected) else False
+
+        self.mode_ctrl.update_camera(avg_motion, now, open_palm)
+        self.particles.spawn_camera(brightness, motion, self.mode_ctrl.is_ember)
+
+        bonfire_state = self.bonfire_palm.update(
+            hand_data,
+            dt,
+            particles=self.particles if self._hand_enabled else None,
+        )
+        if bonfire_state.just_ignited:
+            self.sound.play(AUDIO_BOSS_OUT, volume=0.35)
+
+        pose_data = self._update_pose_interaction(dt) if self._pose_enabled else None
+        return hand_data, pose_data, bonfire_state
+
+    def _update_running_sources(self, now, dt):
+        if self.use_camera and self.camera:
+            if self.camera.ready:
+                return self._spawn_from_camera_source(now, dt)
+
+            self._spawn_from_image_source(now)
+            bonfire_state = self.bonfire_palm.update(None, dt)
+            return None, None, bonfire_state
+
+        self._spawn_from_image_source(now)
+        bonfire_state = self.bonfire_palm.update(None, dt)
+        return None, None, bonfire_state
+
     def on_draw(self):
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
 
@@ -641,44 +695,7 @@ class SoulStreamApp(pyglet.window.Window):
         else:
             _particles_mod.SPAWN_PER_FRAME = SPAWN_PER_FRAME
 
-        hand_data = None
-        pose_data = None
-
-        if self.use_camera and self.camera:
-            if not self.camera.ready:
-                self.mode_ctrl.update_image(now)
-                self.particles.spawn(self.image_source, self.mode_ctrl.is_ember)
-            else:
-                brightness, motion, avg_motion = self.camera.get_data()
-
-                hand_data = self.camera.get_hand_data() if self._hand_enabled else None
-                open_palm = hand_data.is_open_palm if (hand_data and hand_data.detected) else False
-
-                self.mode_ctrl.update_camera(avg_motion, now, open_palm)
-                self.particles.spawn_camera(brightness, motion, self.mode_ctrl.is_ember)
-
-                if hand_data and hand_data.detected and hand_data.is_open_palm:
-                    self.particles.kindle_nearby(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
-                    self.particles.spawn_palm_sparks(hand_data.palm_ndc_x, hand_data.palm_ndc_y)
-                    if not self._prev_palm_open:
-                        self.sound.play(AUDIO_BOSS_OUT, volume=0.35)
-                    self._prev_palm_open = True
-                else:
-                    self._prev_palm_open = False
-
-                if self._pose_enabled:
-                    pose_data = self.camera.get_pose_data()
-                    self._pose_cooldown = max(0.0, self._pose_cooldown - dt)
-                    pose_name = pose_data.pose if pose_data.detected else None
-                    if pose_name and pose_name != self._prev_pose and self._pose_cooldown <= 0:
-                        self._trigger_pose_effect(pose_name, pose_data)
-                        self._pose_cooldown = 5.0
-                    self._prev_pose = pose_name
-                else:
-                    pose_data = None
-        else:
-            self.mode_ctrl.update_image(now)
-            self.particles.spawn(self.image_source, self.mode_ctrl.is_ember)
+        hand_data, pose_data, bonfire_state = self._update_running_sources(now, dt)
 
         # Determine flow field for this frame
         flow = None
@@ -740,6 +757,12 @@ class SoulStreamApp(pyglet.window.Window):
 
         # Gesture corner image
         self._gesture_overlay.draw()
+
+        # Product HUD for the Bonfire Palm interaction
+        self._bonfire_overlay.draw(
+            bonfire_state,
+            visible=self.use_camera and self._hand_enabled and self.bonfire_palm.enabled,
+        )
 
         # Floating key help
         self._draw_float_keys(dt)

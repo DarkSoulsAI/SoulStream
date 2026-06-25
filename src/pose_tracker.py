@@ -64,7 +64,14 @@ try:
                 min_pose_presence_confidence=0.5,
                 min_tracking_confidence=0.5,
             )
-            self._landmarker = PoseLandmarker.create_from_options(options)
+            try:
+                self._landmarker = PoseLandmarker.create_from_options(options)
+            except Exception as e:
+                print(f"[PoseTracker] Could not create pose landmarker ({e}), pose detection disabled.")
+                self._landmarker = None
+                self._frame_ts_ms = 0
+                self._ema = {p: 0.0 for p in _POSE_PRIORITY}
+                return
             self._frame_ts_ms = 0
             self._ema = {p: 0.0 for p in _POSE_PRIORITY}
             print("[PoseTracker] Ready — 7 poses: " + ", ".join(_POSE_PRIORITY))

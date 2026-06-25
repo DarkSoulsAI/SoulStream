@@ -22,6 +22,16 @@ try:
 
     class HandTracker:
         def __init__(self):
+            self._ema_confidence = 0.0
+            self._frame_ts_ms = 0
+
+            if not os.path.exists(MODEL_PATH):
+                print(f"[HandTracker] Model not found: {MODEL_PATH}")
+                print("  Download: https://storage.googleapis.com/mediapipe-models/"
+                      "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task")
+                self._landmarker = None
+                return
+
             BaseOptions = mp.tasks.BaseOptions
             HandLandmarker = mp.tasks.vision.HandLandmarker
             HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
@@ -35,11 +45,17 @@ try:
                 min_hand_presence_confidence=0.5,
                 min_tracking_confidence=0.5,
             )
-            self._landmarker = HandLandmarker.create_from_options(options)
-            self._ema_confidence = 0.0
-            self._frame_ts_ms = 0
+            try:
+                self._landmarker = HandLandmarker.create_from_options(options)
+            except Exception as e:
+                print(f"[HandTracker] Could not create hand landmarker ({e}), hand tracking disabled.")
+                self._landmarker = None
 
         def process(self, frame_bgr) -> HandData:
+            if self._landmarker is None:
+                self._ema_confidence = 0.0
+                return HandData()
+
             import cv2
 
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -102,7 +118,8 @@ try:
             )
 
         def close(self):
-            self._landmarker.close()
+            if self._landmarker is not None:
+                self._landmarker.close()
 
 except (ImportError, Exception) as e:
     print(f"[HandTracker] MediaPipe unavailable ({e}), hand tracking disabled.")

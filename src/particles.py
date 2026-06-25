@@ -158,25 +158,35 @@ class ParticleSystem:
 
         self.count = e
 
-    def spawn_palm_sparks(self, palm_ndc_x, palm_ndc_y):
+    def spawn_palm_sparks(self, palm_ndc_x, palm_ndc_y,
+                          count=15, spread=0.03, intensity=1.0):
         slots = MAX_PARTICLES - self.count
         if slots <= 0:
             return
 
-        n = min(15, slots)
+        count = max(0, int(count))
+        if count == 0:
+            return
+
+        intensity = max(0.0, float(intensity))
+        spread = max(0.0, float(spread))
+        n = min(count, slots)
 
         s = self.count
         e = s + n
 
-        px = palm_ndc_x + np.random.uniform(-0.03, 0.03, n).astype(np.float32)
-        py = palm_ndc_y + np.random.uniform(-0.03, 0.03, n).astype(np.float32)
+        px = palm_ndc_x + np.random.uniform(-spread, spread, n).astype(np.float32)
+        py = palm_ndc_y + np.random.uniform(-spread, spread, n).astype(np.float32)
         self.pos_x[s:e] = px
         self.pos_y[s:e] = py
         self.prev_x[s:e] = px
         self.prev_y[s:e] = py
 
-        self.vel_x[s:e] = np.random.uniform(-0.10, 0.10, n).astype(np.float32)
-        self.vel_y[s:e] = np.random.uniform(0.15, 0.50, n).astype(np.float32)
+        vx = 0.10 * intensity
+        vy_min = 0.12 + 0.03 * intensity
+        vy_max = 0.36 + 0.18 * intensity
+        self.vel_x[s:e] = np.random.uniform(-vx, vx, n).astype(np.float32)
+        self.vel_y[s:e] = np.random.uniform(vy_min, vy_max, n).astype(np.float32)
 
         # Colors: orange #FF8C00 to gold #FFD700, 15% white-hot sparks
         t = np.random.uniform(0.0, 1.0, n).astype(np.float32)
@@ -185,7 +195,7 @@ class ParticleSystem:
         self.color_g[s:e] = np.where(spark, 1.0, 0.55 + t * 0.29)
         self.color_b[s:e] = np.where(spark, 0.9, 0.0)
 
-        life_vals = np.random.uniform(0.4, 1.2, n).astype(np.float32)
+        life_vals = np.random.uniform(0.35, 1.0 + 0.3 * intensity, n).astype(np.float32)
         self.life[s:e] = life_vals
         self.max_life[s:e] = life_vals
         self._phase[s:e] = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)

@@ -106,8 +106,9 @@ _HELP_TEXT = (
     "C       Toggle webcam\n"
     "H       Hand tracker toggle\n"
     "P       Pose detect toggle\n"
+    "B       Bonfire Palm toggle\n"
     "V / 1-5 Visualization mode\n"
-    "PALM    Open palm = kindle ember\n"
+    "PALM    Open palm = Bonfire Palm\n"
     "D       Debug overlay\n"
     "F1      This help\n"
     "ESC     Quit"
@@ -703,7 +704,7 @@ class GestureCornerOverlay:
         self._label.draw()
 
 
-# ── You Died Overlay ───────────────────────────────────────────────────────────
+# You Died Overlay
 
 class YouDiedOverlay:
     """Full-screen blood-red "YOU DIED" overlay, Dark Souls style."""
